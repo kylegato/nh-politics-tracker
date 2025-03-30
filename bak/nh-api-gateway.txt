@@ -1,0 +1,1254 @@
+// nh-api-gateway.js
+// Cloudflare Worker to serve as an API Gateway for the NH Legislative Tracker frontend
+
+/**
+ * Main handler for HTTP requests
+ */
+export default {
+  async fetch(request, env, ctx) {
+    try {
+      const url = new URL(request.url);
+      const pathname = url.pathname;
+      
+      // Basic CORS headers
+      const corsHeaders = {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type',
+      };
+      
+      // Handle OPTIONS (preflight) requests
+      if (request.method === 'OPTIONS') {
+        return new Response(null, {
+          status: 204,
+          headers: corsHeaders,
+        });
+      }
+      
+      // Only allow GET requests for this API
+      if (request.method !== 'GET') {
+        return new Response(JSON.stringify({ error: 'Method not allowed' }), {
+          status: 405,
+          headers: {
+            'Content-Type': 'application/json',
+            ...corsHeaders,
+          },
+        });
+      }
+      
+      // Route requests to appropriate handlers
+      if (pathname.startsWith('/api/bills')) {
+        return await handleBillsRequest(request, env, corsHeaders);
+      } else if (pathname.startsWith('/api/legislators')) {
+        return await handleLegislatorsRequest(request, env, corsHeaders);
+      } else if (pathname.startsWith('/api/committees')) {
+        return await handleCommitteesRequest(request, env, corsHeaders);
+      } else if (pathname.startsWith('/api/sessions')) {
+        return await handleSessionsRequest(request, env, corsHeaders);
+      } else if (pathname.startsWith('/api/accountability')) {
+        return await handleAccountabilityRequest(request, env, corsHeaders);
+      } else if (pathname === '/api/health') {
+        return new Response(JSON.stringify({ status: 'ok' }), {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json',
+            ...corsHeaders,
+          },
+        });
+      } else {
+        return new Response(JSON.stringify({ error: 'Not found' }), {
+          status: 404,
+          headers: {
+            'Content-Type': 'application/json',
+            ...corsHeaders,
+          },
+        });
+      }
+    } catch (error) {
+      console.error(`API Gateway error: ${error.message}`);
+      
+      return new Response(JSON.stringify({ error: 'Internal server error' }), {
+        status: 500,
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+        },
+      });
+    }
+  }
+};
+
+/**
+ * Handle requests for bill data
+ * @param {Request} request - The original request
+ * @param {Object} env - Environment variables with KV binding
+ * @param {Object} corsHeaders - CORS headers to include in response
+ * @returns {Response} - JSON response with bill data
+ */
+async function handleBillsRequest(request, env, corsHeaders) {
+  const url = new URL(request.url);
+  const params = url.searchParams;
+  
+  // Get specific bill if ID is provided
+  if (params.has('id')) {
+    const billId = params.get('id');
+    return await getBillById(billId, env, corsHeaders);
+  }
+  
+  // Get bills by session
+  if (params.has('session')) {
+    const session = params.get('session');
+    const page = parseInt(params.get('page') || '1');
+    const perPage = parseInt(params.get('perPage') || '20');
+    const category = params.get('category') || null;
+    
+    return await getBillsBySession(session, category, page, perPage, env, corsHeaders);
+  }
+  
+  // Get bills by sponsor
+  if (params.has('sponsor')) {
+    const sponsorId = params.get('sponsor');
+    const page = parseInt(params.get('page') || '1');
+    const perPage = parseInt(params.get('perPage') || '20');
+    
+    return await getBillsBySponsor(sponsorId, page, perPage, env, corsHeaders);
+  }
+  
+  // Get bills by search query
+  if (params.has('query')) {
+    const query = params.get('query');
+    const page = parseInt(params.get('page') || '1');
+    const perPage = parseInt(params.get('perPage') || '20');
+    
+    return await searchBills(query, page, perPage, env, corsHeaders);
+  }
+  
+  // Default error for missing required parameters
+  return new Response(JSON.stringify({
+    error: 'Missing required parameters. Required: id, session, sponsor, or query'
+  }), {
+    status: 400,
+    headers: {
+      'Content-Type': 'application/json',
+      ...corsHeaders,
+    },
+  });
+}
+
+/**
+ * Get a specific bill by ID
+ * @param {string} billId - The bill ID
+ * @param {Object} env - Environment variables with KV binding
+ * @param {Object} corsHeaders - CORS headers to include in response
+ * @returns {Response} - JSON response with bill data
+ */
+async function getBillById(billId, env, corsHeaders) {
+  try {
+    const key = `bill:${billId}`;
+    const bill = await env.NH_LEGISLATIVE_DATA.get(key, { type: 'json' });
+    
+    if (!bill) {
+      return new Response(JSON.stringify({ error: 'Bill not found' }), {
+        status: 404,
+        headers: {
+          'Content-Type': 'application/json',
+          ...corsHeaders,
+        },
+      });
+    }
+    
+    return new Response(JSON.stringify(bill), {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        ...corsHeaders,
+      },
+    });
+  } catch (error) {
+    console.error(`Error getting all legislators: ${error.message}`);
+    
+    return new Response(JSON.stringify({ error: 'Failed to retrieve legislators' }), {
+      status: 500,
+      headers: {
+        'Content-Type': 'application/json',
+        ...corsHeaders,
+      },
+    });
+  }
+}
+
+/**
+ * Handle requests for committee data
+ * @param {Request} request - The original request
+ * @param {Object} env - Environment variables with KV binding
+ * @param {Object} corsHeaders - CORS headers to include in response
+ * @returns {Response} - JSON response with committee data
+ */
+async function handleCommitteesRequest(request, env, corsHeaders) {
+  const url = new URL(request.url);
+  const params = url.searchParams;
+  
+  // Get specific committee if ID is provided
+  if (params.has('id')) {
+    const committeeId = params.get('id');
+    return await getCommitteeById(committeeId, env, corsHeaders);
+  }
+  
+  // Get committees by chamber
+  if (params.has('chamber')) {
+    const chamber = params.get('chamber');
+    return await getCommitteesByChamber(chamber, env, corsHeaders);
+  }
+  
+  // Get committee meetings if meetings parameter is provided
+  if (params.has('meetings') && params.has('id')) {
+    const committeeId = params.get('id');
+    return await getCommitteeMeetings(committeeId, env, corsHeaders);
+  }
+  
+  // Get all committees
+  return await getAllCommittees(env, corsHeaders);
+}
+
+/**
+ * Get a specific committee by ID
+ * @param {string} committeeId - The committee ID
+ * @param {Object} env - Environment variables with KV binding
+ * @param {Object} corsHeaders - CORS headers to include in response
+ * @returns {Response} - JSON response with committee data
+ */
+async function getCommitteeById(committeeId, env, corsHeaders) {
+  try {
+    const key = `committee:${committeeId}`;
+    const committee = await env.NH_LEGISLATIVE_DATA.get(key, { type: 'json' });
+    
+    if (!committee) {
+      return new Response(JSON.stringify({ error: 'Committee not found' }), {
+        status: 404,
+        headers: {
+          'Content-Type': 'application/json',
+          ...corsHeaders,
+        },
+      });
+    }
+    
+    return new Response(JSON.stringify(committee), {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        ...corsHeaders,
+      },
+    });
+  } catch (error) {
+    console.error(`Error getting committee by ID: ${error.message}`);
+    
+    return new Response(JSON.stringify({ error: 'Failed to retrieve committee' }), {
+      status: 500,
+      headers: {
+        'Content-Type': 'application/json',
+        ...corsHeaders,
+      },
+    });
+  }
+}
+
+/**
+ * Get committees by chamber
+ * @param {string} chamber - The chamber (upper or lower)
+ * @param {Object} env - Environment variables with KV binding
+ * @param {Object} corsHeaders - CORS headers to include in response
+ * @returns {Response} - JSON response with committee data
+ */
+async function getCommitteesByChamber(chamber, env, corsHeaders) {
+  try {
+    const chamberKey = `index:committee:chamber:${chamber}`;
+    const committeeIds = await env.NH_LEGISLATIVE_DATA.get(chamberKey, { type: 'json' }) || [];
+    
+    if (!committeeIds || committeeIds.length === 0) {
+      return new Response(JSON.stringify([]), {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
+          ...corsHeaders,
+        },
+      });
+    }
+    
+    // Fetch each committee
+    const committeePromises = committeeIds.map(async (id) => {
+      const committeeKey = `committee:${id}`;
+      return await env.NH_LEGISLATIVE_DATA.get(committeeKey, { type: 'json' });
+    });
+    
+    const committees = await Promise.all(committeePromises);
+    const validCommittees = committees.filter(committee => committee !== null);
+    
+    return new Response(JSON.stringify(validCommittees), {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        ...corsHeaders,
+      },
+    });
+  } catch (error) {
+    console.error(`Error getting committees by chamber: ${error.message}`);
+    
+    return new Response(JSON.stringify({ error: 'Failed to retrieve committees' }), {
+      status: 500,
+      headers: {
+        'Content-Type': 'application/json',
+        ...corsHeaders,
+      },
+    });
+  }
+}
+
+/**
+ * Get committee meetings
+ * @param {string} committeeId - The committee ID
+ * @param {Object} env - Environment variables with KV binding
+ * @param {Object} corsHeaders - CORS headers to include in response
+ * @returns {Response} - JSON response with committee meeting data
+ */
+async function getCommitteeMeetings(committeeId, env, corsHeaders) {
+  try {
+    const key = `committee:${committeeId}`;
+    const committee = await env.NH_LEGISLATIVE_DATA.get(key, { type: 'json' });
+    
+    if (!committee) {
+      return new Response(JSON.stringify({ error: 'Committee not found' }), {
+        status: 404,
+        headers: {
+          'Content-Type': 'application/json',
+          ...corsHeaders,
+        },
+      });
+    }
+    
+    // Return just the meetings data
+    return new Response(JSON.stringify(committee.nh_meetings || []), {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        ...corsHeaders,
+      },
+    });
+  } catch (error) {
+    console.error(`Error getting committee meetings: ${error.message}`);
+    
+    return new Response(JSON.stringify({ error: 'Failed to retrieve committee meetings' }), {
+      status: 500,
+      headers: {
+        'Content-Type': 'application/json',
+        ...corsHeaders,
+      },
+    });
+  }
+}
+
+/**
+ * Get all committees
+ * @param {Object} env - Environment variables with KV binding
+ * @param {Object} corsHeaders - CORS headers to include in response
+ * @returns {Response} - JSON response with all committee data
+ */
+async function getAllCommittees(env, corsHeaders) {
+  try {
+    const committeeIds = JSON.parse(
+      await env.NH_LEGISLATIVE_METADATA.get('current_committees')
+    ) || [];
+    
+    if (committeeIds.length === 0) {
+      return new Response(JSON.stringify([]), {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
+          ...corsHeaders,
+        },
+      });
+    }
+    
+    // Fetch each committee
+    const committeePromises = committeeIds.map(async (id) => {
+      const committeeKey = `committee:${id}`;
+      return await env.NH_LEGISLATIVE_DATA.get(committeeKey, { type: 'json' });
+    });
+    
+    const committees = await Promise.all(committeePromises);
+    const validCommittees = committees.filter(committee => committee !== null);
+    
+    return new Response(JSON.stringify(validCommittees), {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        ...corsHeaders,
+      },
+    });
+  } catch (error) {
+    console.error(`Error getting all committees: ${error.message}`);
+    
+    return new Response(JSON.stringify({ error: 'Failed to retrieve committees' }), {
+      status: 500,
+      headers: {
+        'Content-Type': 'application/json',
+        ...corsHeaders,
+      },
+    });
+  }
+}
+
+/**
+ * Handle requests for session data
+ * @param {Request} request - The original request
+ * @param {Object} env - Environment variables with KV binding
+ * @param {Object} corsHeaders - CORS headers to include in response
+ * @returns {Response} - JSON response with session data
+ */
+async function handleSessionsRequest(request, env, corsHeaders) {
+  try {
+    // For NH, we'll use a simpler model since we're focusing on one state
+    // We'll return hardcoded session data or fetch from metadata
+    
+    // Check if we have session data in metadata
+    const sessionData = await env.NH_LEGISLATIVE_METADATA.get('sessions', { type: 'json' });
+    
+    if (sessionData) {
+      return new Response(JSON.stringify(sessionData), {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
+          ...corsHeaders,
+        },
+      });
+    }
+    
+    // Fallback to hardcoded data
+    const currentYear = new Date().getFullYear();
+    const sessions = [
+      {
+        identifier: `${currentYear}`,
+        name: `${currentYear} Regular Session`,
+        start_date: `${currentYear}-01-01`,
+        end_date: `${currentYear}-12-31`,
+        classification: 'primary'
+      },
+      {
+        identifier: `${currentYear-1}`,
+        name: `${currentYear-1} Regular Session`,
+        start_date: `${currentYear-1}-01-01`,
+        end_date: `${currentYear-1}-12-31`,
+        classification: 'primary'
+      }
+    ];
+    
+    return new Response(JSON.stringify(sessions), {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        ...corsHeaders,
+      },
+    });
+  } catch (error) {
+    console.error(`Error getting sessions: ${error.message}`);
+    
+    return new Response(JSON.stringify({ error: 'Failed to retrieve sessions' }), {
+      status: 500,
+      headers: {
+        'Content-Type': 'application/json',
+        ...corsHeaders,
+      },
+    });
+  }
+}
+
+/**
+ * Handle requests for accountability data
+ * @param {Request} request - The original request
+ * @param {Object} env - Environment variables with KV binding
+ * @param {Object} corsHeaders - CORS headers to include in response
+ * @returns {Response} - JSON response with accountability data
+ */
+async function handleAccountabilityRequest(request, env, corsHeaders) {
+  const url = new URL(request.url);
+  const params = url.searchParams;
+  
+  // Get accountability metrics for a specific legislator
+  if (params.has('legislator')) {
+    const legislatorId = params.get('legislator');
+    return await getLegislatorAccountability(legislatorId, env, corsHeaders);
+  }
+  
+  // Get ranking of legislators by a specific metric
+  if (params.has('metric')) {
+    const metric = params.get('metric');
+    const chamber = params.get('chamber') || null;
+    return await getAccountabilityRanking(metric, chamber, env, corsHeaders);
+  }
+  
+  // Get attendance records for a specific committee
+  if (params.has('committee')) {
+    const committeeId = params.get('committee');
+    return await getCommitteeAttendance(committeeId, env, corsHeaders);
+  }
+  
+  // Default: return available accountability metrics
+  return new Response(JSON.stringify({
+    metrics: [
+      { id: 'attendance', name: 'Attendance Rate', description: 'Percentage of votes attended' },
+      { id: 'vote_party_alignment', name: 'Party Alignment', description: 'Percentage of votes aligned with party' },
+      { id: 'sponsored_bills', name: 'Bills Sponsored', description: 'Number of bills sponsored' },
+      { id: 'passed_bills', name: 'Bills Passed', description: 'Number of sponsored bills that passed' },
+      { id: 'committee_attendance', name: 'Committee Attendance', description: 'Attendance rate at committee meetings' }
+    ]
+  }), {
+    status: 200,
+    headers: {
+      'Content-Type': 'application/json',
+      ...corsHeaders,
+    },
+  });
+}
+
+/**
+ * Get accountability metrics for a specific legislator
+ * @param {string} legislatorId - The legislator ID
+ * @param {Object} env - Environment variables with KV binding
+ * @param {Object} corsHeaders - CORS headers to include in response
+ * @returns {Response} - JSON response with accountability data
+ */
+async function getLegislatorAccountability(legislatorId, env, corsHeaders) {
+  try {
+    const key = `legislator:${legislatorId}`;
+    const legislator = await env.NH_LEGISLATIVE_DATA.get(key, { type: 'json' });
+    
+    if (!legislator) {
+      return new Response(JSON.stringify({ error: 'Legislator not found' }), {
+        status: 404,
+        headers: {
+          'Content-Type': 'application/json',
+          ...corsHeaders,
+        },
+      });
+    }
+    
+    // Return the accountability metrics
+    return new Response(JSON.stringify({
+      legislator: {
+        id: legislator.id,
+        name: legislator.name,
+        party: legislator.party,
+        district: legislator.current_role?.district || null,
+        chamber: legislator.current_role?.chamber || null
+      },
+      metrics: legislator.nh_accountability || {}
+    }), {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        ...corsHeaders,
+      },
+    });
+  } catch (error) {
+    console.error(`Error getting legislator accountability: ${error.message}`);
+    
+    return new Response(JSON.stringify({ error: 'Failed to retrieve accountability data' }), {
+      status: 500,
+      headers: {
+        'Content-Type': 'application/json',
+        ...corsHeaders,
+      },
+    });
+  }
+}
+
+/**
+ * Get ranking of legislators by a specific accountability metric
+ * @param {string} metric - The accountability metric
+ * @param {string} chamber - Optional chamber filter
+ * @param {Object} env - Environment variables with KV binding
+ * @param {Object} corsHeaders - CORS headers to include in response
+ * @returns {Response} - JSON response with ranked legislator data
+ */
+async function getAccountabilityRanking(metric, chamber, env, corsHeaders) {
+  try {
+    // Get all legislators or filtered by chamber
+    let legislatorIds;
+    
+    if (chamber) {
+      const chamberKey = `index:chamber:${chamber}`;
+      legislatorIds = await env.NH_LEGISLATIVE_DATA.get(chamberKey, { type: 'json' }) || [];
+    } else {
+      legislatorIds = JSON.parse(
+        await env.NH_LEGISLATIVE_METADATA.get('current_legislators')
+      ) || [];
+    }
+    
+    if (legislatorIds.length === 0) {
+      return new Response(JSON.stringify([]), {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
+          ...corsHeaders,
+        },
+      });
+    }
+    
+    // Fetch each legislator
+    const legislatorPromises = legislatorIds.map(async (id) => {
+      const legislatorKey = `legislator:${id}`;
+      return await env.NH_LEGISLATIVE_DATA.get(legislatorKey, { type: 'json' });
+    });
+    
+    const legislators = await Promise.all(legislatorPromises);
+    const validLegislators = legislators.filter(legislator => legislator !== null);
+    
+    // Extract relevant data and sort by the specified metric
+    const rankedLegislators = validLegislators.map(legislator => ({
+      id: legislator.id,
+      name: legislator.name,
+      party: legislator.party,
+      district: legislator.current_role?.district || null,
+      chamber: legislator.current_role?.chamber || null,
+      value: legislator.nh_accountability?.[metric] || 0
+    }))
+    .sort((a, b) => b.value - a.value);
+    
+    return new Response(JSON.stringify({
+      metric,
+      chamber: chamber || 'all',
+      rankings: rankedLegislators
+    }), {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        ...corsHeaders,
+      },
+    });
+  } catch (error) {
+    console.error(`Error getting accountability ranking: ${error.message}`);
+    
+    return new Response(JSON.stringify({ error: 'Failed to retrieve accountability ranking' }), {
+      status: 500,
+      headers: {
+        'Content-Type': 'application/json',
+        ...corsHeaders,
+      },
+    });
+  }
+}
+
+/**
+ * Get attendance records for a specific committee
+ * @param {string} committeeId - The committee ID
+ * @param {Object} env - Environment variables with KV binding
+ * @param {Object} corsHeaders - CORS headers to include in response
+ * @returns {Response} - JSON response with committee attendance data
+ */
+async function getCommitteeAttendance(committeeId, env, corsHeaders) {
+  try {
+    const key = `committee:${committeeId}`;
+    const committee = await env.NH_LEGISLATIVE_DATA.get(key, { type: 'json' });
+    
+    if (!committee) {
+      return new Response(JSON.stringify({ error: 'Committee not found' }), {
+        status: 404,
+        headers: {
+          'Content-Type': 'application/json',
+          ...corsHeaders,
+        },
+      });
+    }
+    
+    // Calculate attendance rates for each member
+    const members = committee.members || [];
+    const memberAttendance = [];
+    
+    for (const member of members) {
+      if (!member.id) continue;
+      
+      // Get attendance records for this member
+      const attendanceKey = `attendance:${member.id}`;
+      const attendanceRecords = JSON.parse(
+        await env.NH_LEGISLATIVE_DATA.get(attendanceKey)
+      ) || [];
+      
+      // Filter to just this committee
+      const committeeRecords = attendanceRecords.filter(
+        record => record.committee_id === committeeId
+      );
+      
+      // Calculate attendance rate
+      const totalMeetings = committeeRecords.length;
+      const attendedMeetings = committeeRecords.filter(record => record.present).length;
+      const attendanceRate = totalMeetings > 0 ? (attendedMeetings / totalMeetings) * 100 : 0;
+      
+      memberAttendance.push({
+        member_id: member.id,
+        member_name: member.name,
+        role: member.role,
+        attendance_rate: attendanceRate,
+        meetings_attended: attendedMeetings,
+        total_meetings: totalMeetings
+      });
+    }
+    
+    // Sort by attendance rate (descending)
+    memberAttendance.sort((a, b) => b.attendance_rate - a.attendance_rate);
+    
+    return new Response(JSON.stringify({
+      committee: {
+        id: committee.id,
+        name: committee.name,
+        chamber: committee.chamber
+      },
+      attendance: memberAttendance
+    }), {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        ...corsHeaders,
+      },
+    });
+  } catch (error) {
+    console.error(`Error getting committee attendance: ${error.message}`);
+    
+    return new Response(JSON.stringify({ error: 'Failed to retrieve committee attendance' }), {
+      status: 500,
+      headers: {
+        'Content-Type': 'application/json',
+        ...corsHeaders,
+      },
+    });
+  }
+}application/json',
+        ...corsHeaders,
+      },
+    });
+  } catch (error) {
+    console.error(`Error getting bill by ID: ${error.message}`);
+    
+    return new Response(JSON.stringify({ error: 'Failed to retrieve bill' }), {
+      status: 500,
+      headers: {
+        'Content-Type': 'application/json',
+        ...corsHeaders,
+      },
+    });
+  }
+}
+
+/**
+ * Get bills by session
+ * @param {string} session - The legislative session
+ * @param {string} category - Optional category filter
+ * @param {number} page - Page number for pagination
+ * @param {number} perPage - Items per page
+ * @param {Object} env - Environment variables with KV binding
+ * @param {Object} corsHeaders - CORS headers to include in response
+ * @returns {Response} - JSON response with bill data
+ */
+async function getBillsBySession(session, category, page, perPage, env, corsHeaders) {
+  try {
+    let billIdentifiers;
+    
+    if (category) {
+      // Get bills for this session and category
+      const categoryKey = `index:category:${category}`;
+      const categoryBills = await env.NH_LEGISLATIVE_DATA.get(categoryKey, { type: 'json' }) || [];
+      
+      // Get bills for this session
+      const sessionKey = `index:session:${session}`;
+      const sessionBills = await env.NH_LEGISLATIVE_DATA.get(sessionKey, { type: 'json' }) || [];
+      
+      // Find bills that are in both arrays
+      billIdentifiers = sessionBills.filter(bill => categoryBills.includes(bill));
+    } else {
+      // Get all bills for this session
+      const sessionKey = `index:session:${session}`;
+      billIdentifiers = await env.NH_LEGISLATIVE_DATA.get(sessionKey, { type: 'json' }) || [];
+    }
+    
+    if (!billIdentifiers || billIdentifiers.length === 0) {
+      return new Response(JSON.stringify({ 
+        results: [],
+        pagination: {
+          page,
+          per_page: perPage,
+          total_items: 0,
+          total_pages: 0
+        }
+      }), {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
+          ...corsHeaders,
+        },
+      });
+    }
+    
+    // Calculate pagination
+    const start = (page - 1) * perPage;
+    const end = Math.min(start + perPage, billIdentifiers.length);
+    const paginatedIdentifiers = billIdentifiers.slice(start, end);
+    
+    // Fetch each bill
+    const billPromises = paginatedIdentifiers.map(async (identifier) => {
+      const billKey = `bill:${identifier}`;
+      return await env.NH_LEGISLATIVE_DATA.get(billKey, { type: 'json' });
+    });
+    
+    const bills = await Promise.all(billPromises);
+    const validBills = bills.filter(bill => bill !== null);
+    
+    return new Response(JSON.stringify({
+      results: validBills,
+      pagination: {
+        page,
+        per_page: perPage,
+        total_items: billIdentifiers.length,
+        total_pages: Math.ceil(billIdentifiers.length / perPage)
+      }
+    }), {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        ...corsHeaders,
+      },
+    });
+  } catch (error) {
+    console.error(`Error getting bills by session: ${error.message}`);
+    
+    return new Response(JSON.stringify({ error: 'Failed to retrieve bills' }), {
+      status: 500,
+      headers: {
+        'Content-Type': 'application/json',
+        ...corsHeaders,
+      },
+    });
+  }
+}
+
+/**
+ * Get bills by sponsor
+ * @param {string} sponsorId - The sponsor's ID
+ * @param {number} page - Page number for pagination
+ * @param {number} perPage - Items per page
+ * @param {Object} env - Environment variables with KV binding
+ * @param {Object} corsHeaders - CORS headers to include in response
+ * @returns {Response} - JSON response with bill data
+ */
+async function getBillsBySponsor(sponsorId, page, perPage, env, corsHeaders) {
+  try {
+    // Get bills sponsored by this legislator
+    const sponsorKey = `index:sponsor:${sponsorId}`;
+    const billIdentifiers = await env.NH_LEGISLATIVE_DATA.get(sponsorKey, { type: 'json' }) || [];
+    
+    if (!billIdentifiers || billIdentifiers.length === 0) {
+      return new Response(JSON.stringify({ 
+        results: [],
+        pagination: {
+          page,
+          per_page: perPage,
+          total_items: 0,
+          total_pages: 0
+        }
+      }), {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
+          ...corsHeaders,
+        },
+      });
+    }
+    
+    // Calculate pagination
+    const start = (page - 1) * perPage;
+    const end = Math.min(start + perPage, billIdentifiers.length);
+    const paginatedIdentifiers = billIdentifiers.slice(start, end);
+    
+    // Fetch each bill
+    const billPromises = paginatedIdentifiers.map(async (identifier) => {
+      const billKey = `bill:${identifier}`;
+      return await env.NH_LEGISLATIVE_DATA.get(billKey, { type: 'json' });
+    });
+    
+    const bills = await Promise.all(billPromises);
+    const validBills = bills.filter(bill => bill !== null);
+    
+    return new Response(JSON.stringify({
+      results: validBills,
+      pagination: {
+        page,
+        per_page: perPage,
+        total_items: billIdentifiers.length,
+        total_pages: Math.ceil(billIdentifiers.length / perPage)
+      }
+    }), {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        ...corsHeaders,
+      },
+    });
+  } catch (error) {
+    console.error(`Error getting bills by sponsor: ${error.message}`);
+    
+    return new Response(JSON.stringify({ error: 'Failed to retrieve bills' }), {
+      status: 500,
+      headers: {
+        'Content-Type': 'application/json',
+        ...corsHeaders,
+      },
+    });
+  }
+}
+
+/**
+ * Search bills by query string
+ * @param {string} query - Search query
+ * @param {number} page - Page number for pagination
+ * @param {number} perPage - Items per page
+ * @param {Object} env - Environment variables with KV binding
+ * @param {Object} corsHeaders - CORS headers to include in response
+ * @returns {Response} - JSON response with search results
+ */
+async function searchBills(query, page, perPage, env, corsHeaders) {
+  try {
+    // This is a simplified search implementation
+    // For a production system, you would want to implement a proper search index
+    
+    // List all bill keys
+    const allKeys = await env.NH_LEGISLATIVE_DATA.list({ prefix: 'bill:' });
+    const keys = allKeys.keys.map(k => k.name);
+    
+    // Fetch bills in batches to avoid overwhelming KV
+    const BATCH_SIZE = 100;
+    let matchingBills = [];
+    
+    for (let i = 0; i < keys.length; i += BATCH_SIZE) {
+      const batchKeys = keys.slice(i, i + BATCH_SIZE);
+      
+      const batchPromises = batchKeys.map(async (key) => {
+        const bill = await env.NH_LEGISLATIVE_DATA.get(key, { type: 'json' });
+        
+        if (!bill) return null;
+        
+        // Simple search implementation
+        const normalizedQuery = query.toLowerCase();
+        const titleMatch = bill.title?.toLowerCase().includes(normalizedQuery);
+        const descriptionMatch = bill.description?.toLowerCase().includes(normalizedQuery);
+        const identifierMatch = bill.identifier?.toLowerCase().includes(normalizedQuery);
+        
+        if (titleMatch || descriptionMatch || identifierMatch) {
+          return bill;
+        }
+        
+        return null;
+      });
+      
+      const batchResults = await Promise.all(batchPromises);
+      matchingBills = matchingBills.concat(batchResults.filter(bill => bill !== null));
+    }
+    
+    // Apply pagination
+    const start = (page - 1) * perPage;
+    const end = Math.min(start + perPage, matchingBills.length);
+    const paginatedResults = matchingBills.slice(start, end);
+    
+    return new Response(JSON.stringify({
+      results: paginatedResults,
+      pagination: {
+        page,
+        per_page: perPage,
+        total_items: matchingBills.length,
+        total_pages: Math.ceil(matchingBills.length / perPage)
+      }
+    }), {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        ...corsHeaders,
+      },
+    });
+  } catch (error) {
+    console.error(`Error searching bills: ${error.message}`);
+    
+    return new Response(JSON.stringify({ error: 'Failed to search bills' }), {
+      status: 500,
+      headers: {
+        'Content-Type': 'application/json',
+        ...corsHeaders,
+      },
+    });
+  }
+}
+
+/**
+ * Handle requests for legislator data
+ * @param {Request} request - The original request
+ * @param {Object} env - Environment variables with KV binding
+ * @param {Object} corsHeaders - CORS headers to include in response
+ * @returns {Response} - JSON response with legislator data
+ */
+async function handleLegislatorsRequest(request, env, corsHeaders) {
+  const url = new URL(request.url);
+  const params = url.searchParams;
+  
+  // Get specific legislator if ID is provided
+  if (params.has('id')) {
+    const legislatorId = params.get('id');
+    return await getLegislatorById(legislatorId, env, corsHeaders);
+  }
+  
+  // Get legislators by party
+  if (params.has('party')) {
+    const party = params.get('party');
+    return await getLegislatorsByParty(party, env, corsHeaders);
+  }
+  
+  // Get legislators by district
+  if (params.has('district')) {
+    const district = params.get('district');
+    return await getLegislatorsByDistrict(district, env, corsHeaders);
+  }
+  
+  // Get legislators by chamber
+  if (params.has('chamber')) {
+    const chamber = params.get('chamber');
+    return await getLegislatorsByChamber(chamber, env, corsHeaders);
+  }
+  
+  // Get all legislators
+  return await getAllLegislators(env, corsHeaders);
+}
+
+/**
+ * Get a specific legislator by ID
+ * @param {string} legislatorId - The legislator ID
+ * @param {Object} env - Environment variables with KV binding
+ * @param {Object} corsHeaders - CORS headers to include in response
+ * @returns {Response} - JSON response with legislator data
+ */
+async function getLegislatorById(legislatorId, env, corsHeaders) {
+  try {
+    const key = `legislator:${legislatorId}`;
+    const legislator = await env.NH_LEGISLATIVE_DATA.get(key, { type: 'json' });
+    
+    if (!legislator) {
+      return new Response(JSON.stringify({ error: 'Legislator not found' }), {
+        status: 404,
+        headers: {
+          'Content-Type': 'application/json',
+          ...corsHeaders,
+        },
+      });
+    }
+    
+    return new Response(JSON.stringify(legislator), {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        ...corsHeaders,
+      },
+    });
+  } catch (error) {
+    console.error(`Error getting legislator by ID: ${error.message}`);
+    
+    return new Response(JSON.stringify({ error: 'Failed to retrieve legislator' }), {
+      status: 500,
+      headers: {
+        'Content-Type': 'application/json',
+        ...corsHeaders,
+      },
+    });
+  }
+}
+
+/**
+ * Get legislators by party
+ * @param {string} party - The political party
+ * @param {Object} env - Environment variables with KV binding
+ * @param {Object} corsHeaders - CORS headers to include in response
+ * @returns {Response} - JSON response with legislator data
+ */
+async function getLegislatorsByParty(party, env, corsHeaders) {
+  try {
+    const partyKey = `index:party:${party}`;
+    const legislatorIds = await env.NH_LEGISLATIVE_DATA.get(partyKey, { type: 'json' }) || [];
+    
+    if (!legislatorIds || legislatorIds.length === 0) {
+      return new Response(JSON.stringify([]), {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
+          ...corsHeaders,
+        },
+      });
+    }
+    
+    // Fetch each legislator
+    const legislatorPromises = legislatorIds.map(async (id) => {
+      const legislatorKey = `legislator:${id}`;
+      return await env.NH_LEGISLATIVE_DATA.get(legislatorKey, { type: 'json' });
+    });
+    
+    const legislators = await Promise.all(legislatorPromises);
+    const validLegislators = legislators.filter(legislator => legislator !== null);
+    
+    return new Response(JSON.stringify(validLegislators), {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        ...corsHeaders,
+      },
+    });
+  } catch (error) {
+    console.error(`Error getting legislators by party: ${error.message}`);
+    
+    return new Response(JSON.stringify({ error: 'Failed to retrieve legislators' }), {
+      status: 500,
+      headers: {
+        'Content-Type': 'application/json',
+        ...corsHeaders,
+      },
+    });
+  }
+}
+
+/**
+ * Get legislators by district
+ * @param {string} district - The district
+ * @param {Object} env - Environment variables with KV binding
+ * @param {Object} corsHeaders - CORS headers to include in response
+ * @returns {Response} - JSON response with legislator data
+ */
+async function getLegislatorsByDistrict(district, env, corsHeaders) {
+  try {
+    const districtKey = `index:district:${district}`;
+    const legislatorIds = await env.NH_LEGISLATIVE_DATA.get(districtKey, { type: 'json' }) || [];
+    
+    if (!legislatorIds || legislatorIds.length === 0) {
+      return new Response(JSON.stringify([]), {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
+          ...corsHeaders,
+        },
+      });
+    }
+    
+    // Fetch each legislator
+    const legislatorPromises = legislatorIds.map(async (id) => {
+      const legislatorKey = `legislator:${id}`;
+      return await env.NH_LEGISLATIVE_DATA.get(legislatorKey, { type: 'json' });
+    });
+    
+    const legislators = await Promise.all(legislatorPromises);
+    const validLegislators = legislators.filter(legislator => legislator !== null);
+    
+    return new Response(JSON.stringify(validLegislators), {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        ...corsHeaders,
+      },
+    });
+  } catch (error) {
+    console.error(`Error getting legislators by district: ${error.message}`);
+    
+    return new Response(JSON.stringify({ error: 'Failed to retrieve legislators' }), {
+      status: 500,
+      headers: {
+        'Content-Type': 'application/json',
+        ...corsHeaders,
+      },
+    });
+  }
+}
+
+/**
+ * Get legislators by chamber
+ * @param {string} chamber - The chamber (upper or lower)
+ * @param {Object} env - Environment variables with KV binding
+ * @param {Object} corsHeaders - CORS headers to include in response
+ * @returns {Response} - JSON response with legislator data
+ */
+async function getLegislatorsByChamber(chamber, env, corsHeaders) {
+  try {
+    const chamberKey = `index:chamber:${chamber}`;
+    const legislatorIds = await env.NH_LEGISLATIVE_DATA.get(chamberKey, { type: 'json' }) || [];
+    
+    if (!legislatorIds || legislatorIds.length === 0) {
+      return new Response(JSON.stringify([]), {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
+          ...corsHeaders,
+        },
+      });
+    }
+    
+    // Fetch each legislator
+    const legislatorPromises = legislatorIds.map(async (id) => {
+      const legislatorKey = `legislator:${id}`;
+      return await env.NH_LEGISLATIVE_DATA.get(legislatorKey, { type: 'json' });
+    });
+    
+    const legislators = await Promise.all(legislatorPromises);
+    const validLegislators = legislators.filter(legislator => legislator !== null);
+    
+    return new Response(JSON.stringify(validLegislators), {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        ...corsHeaders,
+      },
+    });
+  } catch (error) {
+    console.error(`Error getting legislators by chamber: ${error.message}`);
+    
+    return new Response(JSON.stringify({ error: 'Failed to retrieve legislators' }), {
+      status: 500,
+      headers: {
+        'Content-Type': 'application/json',
+        ...corsHeaders,
+      },
+    });
+  }
+}
+
+/**
+ * Get all legislators
+ * @param {Object} env - Environment variables with KV binding
+ * @param {Object} corsHeaders - CORS headers to include in response
+ * @returns {Response} - JSON response with all legislator data
+ */
+async function getAllLegislators(env, corsHeaders) {
+  try {
+    const legislatorIds = JSON.parse(
+      await env.NH_LEGISLATIVE_METADATA.get('current_legislators')
+    ) || [];
+    
+    if (legislatorIds.length === 0) {
+      return new Response(JSON.stringify([]), {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
+          ...corsHeaders,
+        },
+      });
+    }
+    
+    // Fetch each legislator
+    const legislatorPromises = legislatorIds.map(async (id) => {
+      const legislatorKey = `legislator:${id}`;
+      return await env.NH_LEGISLATIVE_DATA.get(legislatorKey, { type: 'json' });
+    });
+    
+    const legislators = await Promise.all(legislatorPromises);
+    const validLegislators = legislators.filter(legislator => legislator !== null);
+    
+    return new Response(JSON.stringify(validLegislators), {
+      status: 200,
+      headers: {
+        'Content-Type': '

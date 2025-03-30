@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 500">
+  <!-- Background -->
+  <rect width="800" height="500" fill="#f8f9fa" rx="10" ry="10" />
+  
+  <!-- OpenStates API Section -->
+  <rect x="50" y="50" width="200" height="80" fill="#e9ecef" stroke="#ced4da" stroke-width="2" rx="5" ry="5" />
+  <text x="150" y="95" font-family="Arial" font-size="16" text-anchor="middle" fill="#212529">OpenStates API</text>
+  
+  <!-- Cloudflare Workers Section -->
+  <rect x="150" y="180" width="500" height="250" fill="#e9ecef" stroke="#ced4da" stroke-width="2" rx="5" ry="5" />
+  <text x="400" y="210" font-family="Arial" font-size="20" font-weight="bold" text-anchor="middle" fill="#212529">Cloudflare Workers</text>
+  
+  <!-- Scheduled Data Collector -->
+  <rect x="200" y="230" width="180" height="70" fill="#d0ebff" stroke="#4dabf7" stroke-width="2" rx="5" ry="5" />
+  <text x="290" y="270" font-family="Arial" font-size="14" text-anchor="middle" fill="#212529">Scheduled Collector</text>
+  
+  <!-- API Gateway -->
+  <rect x="420" y="230" width="180" height="70" fill="#d3f9d8" stroke="#69db7c" stroke-width="2" rx="5" ry="5" />
+  <text x="510" y="270" font-family="Arial" font-size="14" text-anchor="middle" fill="#212529">API Gateway</text>
+  
+  <!-- Storage -->
+  <rect x="200" y="340" width="180" height="70" fill="#fff3bf" stroke="#ffd43b" stroke-width="2" rx="5" ry="5" />
+  <text x="290" y="380" font-family="Arial" font-size="14" text-anchor="middle" fill="#212529">Cloudflare KV/D1</text>
+  
+  <!-- Cache -->
+  <rect x="420" y="340" width="180" height="70" fill="#ffe8cc" stroke="#ffa94d" stroke-width="2" rx="5" ry="5" />
+  <text x="510" y="380" font-family="Arial" font-size="14" text-anchor="middle" fill="#212529">Cache Layer</text>
+  
+  <!-- Frontend Application -->
+  <rect x="550" y="50" width="200" height="80" fill="#e9ecef" stroke="#ced4da" stroke-width="2" rx="5" ry="5" />
+  <text x="650" y="95" font-family="Arial" font-size="16" text-anchor="middle" fill="#212529">Frontend Application</text>
+  
+  <!-- Arrows -->
+  <!-- OpenStates to Collector -->
+  <line x1="150" y1="130" x2="250" y2="230" stroke="#adb5bd" stroke-width="2" marker-end="url(#arrowhead)" />
+  <!-- Collector to Storage -->
+  <line x1="290" y1="300" x2="290" y2="340" stroke="#adb5bd" stroke-width="2" marker-end="url(#arrowhead)" />
+  <!-- Storage to API Gateway -->
+  <line x1="380" y1="375" x2="420" y2="375" stroke="#adb5bd" stroke-width="2" marker-end="url(#arrowhead)" />
+  <!-- API Gateway to Cache -->
+  <line x1="510" y1="300" x2="510" y2="340" stroke="#adb5bd" stroke-width="2" marker-end="url(#arrowhead)" />
+  <!-- API Gateway to Frontend -->
+  <line x1="550" y1="230" x2="650" y2="130" stroke="#adb5bd" stroke-width="2" marker-end="url(#arrowhead)" />
+  
+  <!-- Arrowhead marker -->
+  <defs>
+    <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#adb5bd" />
+    </marker>
+  </defs>
+
+  <!-- Data Flow Explanation -->
+  <text x="400" y="480" font-family="Arial" font-size="14" text-anchor="middle" fill="#495057">Data flows: OpenStates → Collector → Storage → API Gateway → Frontend</text>
+</svg>

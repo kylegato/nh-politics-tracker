@@ -1,0 +1,150 @@
+/* Main App Styles */
+
+/* App container */
+.app-container {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Header styles */
+.app-header {
+  background-color: #fff;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  padding: 1rem 2rem;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.app-header h1 {
+  margin: 0;
+  color: #1e3a8a;
+  font-size: 1.5rem;
+}
+
+.app-nav {
+  display: flex;
+  gap: 1.5rem;
+  margin-top: 1rem;
+}
+
+.nav-item {
+  color: #6b7280;
+  text-decoration: none;
+  font-weight: 500;
+  padding: 0.5rem 0;
+  border-bottom: 2px solid transparent;
+  transition: all 0.2s ease;
+}
+
+.nav-item:hover {
+  color: #1e3a8a;
+  border-bottom-color: #1e3a8a;
+}
+
+.nav-item.active {
+  color: #1e3a8a;
+  border-bottom-color: #1e3a8a;
+}
+
+/* Main content area */
+.main-content {
+  flex: 1;
+  padding: 2rem;
+  background-color: #f9fafb;
+}
+
+/* Container for centered content */
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 1rem;
+}
+
+/* Footer styles */
+.app-footer {
+  background-color: #1e3a8a;
+  color: white;
+  padding: 1.5rem 0;
+  margin-top: auto;
+}
+
+.app-footer p {
+  margin: 0;
+  text-align: center;
+}
+
+/* Home page styles */
+.home-hero {
+  padding: 3rem 0;
+  text-align: center;
+}
+
+.home-hero h2 {
+  font-size: 2.25rem;
+  color: #1e3a8a;
+  margin-bottom: 1rem;
+}
+
+.home-hero p {
+  font-size: 1.125rem;
+  color: #4b5563;
+  max-width: 800px;
+  margin: 0 auto 2rem;
+}
+
+.feature-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 2rem;
+  margin-top: 3rem;
+}
+
+.feature-card {
+  background-color: white;
+  border-radius: 0.5rem;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  padding: 1.5rem;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.feature-card:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.feature-card h3 {
+  color: #1e3a8a;
+  margin-top: 0;
+  margin-bottom: 1rem;
+}
+
+.feature-card p {
+  color: #6b7280;
+  margin-bottom: 0;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .app-header {
+    padding: 1rem;
+  }
+  
+  .app-nav {
+    flex-wrap: wrap;
+    gap: 1rem;
+  }
+  
+  .main-content {
+    padding: 1rem;
+  }
+  
+  .home-hero h2 {
+    font-size: 1.75rem;
+  }
+  
+  .home-hero p {
+    font-size: 1rem;
+  }
+} 

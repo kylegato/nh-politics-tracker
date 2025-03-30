@@ -1,0 +1,298 @@
+// Add these functions to the existing NH API Gateway
+
+/**
+ * Handle requests for bill analysis data
+ * @param {Request} request - The original request
+ * @param {Object} env - Environment variables with KV binding
+ * @param {Object} corsHeaders - CORS headers to include in response
+ * @returns {Response} - JSON response with analysis data
+ */
+async function handleAnalysisRequest(request, env, corsHeaders) {
+  const url = new URL(request.url);
+  const params = url.searchParams;
+  
+  // Get analysis for a specific bill
+  if (params.has('bill_id')) {
+    const billId = params.get('bill_id');
+    return await getBillAnalysis(billId, env, corsHeaders);
+  }
+  
+  // Get analysis summaries by impact type
+  if (params.has('impact_type')) {
+    const impactType = params.get('impact_type');
+    return await getAnalysisByImpactType(impactType, env, corsHeaders);
+  }
+  
+  // Get highlighted bills with significant impacts
+  if (params.has('highlighted')) {
+    return await getHighlightedBillsAnalysis(env, corsHeaders);
+  }
+  
+  // Get all analysis summaries
+  return await getAllAnalysisSummaries(env, corsHeaders);
+}
+
+/**
+ * Get analysis for a specific bill
+ * @param {string} billId - The bill ID
+ * @param {Object} env - Environment variables with KV binding
+ * @param {Object} corsHeaders - CORS headers to include in response
+ * @returns {Response} - JSON response with bill analysis data
+ */
+async function getBillAnalysis(billId, env, corsHeaders) {
+  try {
+    const billKey = `bill:${billId}`;
+    const bill = await env.NH_LEGISLATIVE_DATA.get(billKey, { type: 'json' });
+    
+    if (!bill) {
+      return new Response(JSON.stringify({ error: 'Bill not found' }), {
+        status: 404,
+        headers: {
+          'Content-Type': 'application/json',
+          ...corsHeaders,
+        },
+      });
+    }
+    
+    // If bill has no analysis, return that info
+    if (!bill.nh_analysis) {
+      return new Response(JSON.stringify({ 
+        id: billId,
+        title: bill.title,
+        analysis_available: false,
+        message: "No analysis available for this bill"
+      }), {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
+          ...corsHeaders,
+        },
+      });
+    }
+    
+    // Return the analysis along with basic bill info
+    return new Response(JSON.stringify({
+      id: billId,
+      title: bill.title,
+      identifier: bill.identifier,
+      analysis_available: true,
+      analysis_timestamp: bill.nh_analysis.timestamp,
+      impacts: {
+        tax_impact: bill.nh_analysis.tax_impact,
+        budget_impact: bill.nh_analysis.budget_impact,
+        societal_impact: bill.nh_analysis.societal_impact,
+        institutional_alignment: bill.nh_analysis.institutional_alignment
+      }
+    }), {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        ...corsHeaders,
+      },
+    });
+  } catch (error) {
+    console.error(`Error getting bill analysis: ${error.message}`);
+    
+    return new Response(JSON.stringify({ error: 'Failed to retrieve bill analysis' }), {
+      status: 500,
+      headers: {
+        'Content-Type': 'application/json',
+        ...corsHeaders,
+      },
+    });
+  }
+}
+
+/**
+ * Get analysis summaries by impact type
+ * @param {string} impactType - The type of impact (tax, budget, societal, institutional)
+ * @param {Object} env - Environment variables with KV binding
+ * @param {Object} corsHeaders - CORS headers to include in response
+ * @returns {Response} - JSON response with analysis summaries
+ */
+async function getAnalysisByImpactType(impactType, env, corsHeaders) {
+  try {
+    // Validate impact type
+    const validTypes = ['tax_impact', 'budget_impact', 'societal_impact', 'institutional_alignment'];
+    if (!validTypes.includes(impactType)) {
+      return new Response(JSON.stringify({ 
+        error: 'Invalid impact type',
+        valid_types: validTypes
+      }), {
+        status: 400,
+        headers: {
+          'Content-Type': 'application/json',
+          ...corsHeaders,
+        },
+      });
+    }
+    
+    // Get analysis summaries
+    const summaries = await env.NH_LEGISLATIVE_METADATA.get('analysis_summaries', { type: 'json' });
+    
+    if (!summaries || !summaries[impactType]) {
+      return new Response(JSON.stringify({ 
+        impact_type: impactType,
+        bills: []
+      }), {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
+          ...corsHeaders,
+        },
+      });
+    }
+    
+    return new Response(JSON.stringify({
+      impact_type: impactType,
+      bills: summaries[impactType]
+    }), {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        ...corsHeaders,
+      },
+    });
+  } catch (error) {
+    console.error(`Error getting analysis by impact type: ${error.message}`);
+    
+    return new Response(JSON.stringify({ error: 'Failed to retrieve impact analysis' }), {
+      status: 500,
+      headers: {
+        'Content-Type': 'application/json',
+        ...corsHeaders,
+      },
+    });
+  }
+}
+
+/**
+ * Get highlighted bills with significant impacts
+ * @param {Object} env - Environment variables with KV binding
+ * @param {Object} corsHeaders - CORS headers to include in response
+ * @returns {Response} - JSON response with highlighted bills analysis
+ */
+async function getHighlightedBillsAnalysis(env, corsHeaders) {
+  try {
+    // Get highlighted bills index
+    const highlightKey = `index:highlighted_bills`;
+    const highlightedBills = await env.NH_LEGISLATIVE_DATA.get(highlightKey, { type: 'json' }) || [];
+    
+    if (highlightedBills.length === 0) {
+      return new Response(JSON.stringify({ 
+        highlighted_bills: []
+      }), {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
+          ...corsHeaders,
+        },
+      });
+    }
+    
+    // Fetch each highlighted bill with its analysis
+    const billPromises = highlightedBills.map(async (billId) => {
+      const billKey = `bill:${billId}`;
+      const bill = await env.NH_LEGISLATIVE_DATA.get(billKey, { type: 'json' });
+      
+      if (!bill || !bill.nh_analysis) return null;
+      
+      return {
+        id: billId,
+        title: bill.title,
+        identifier: bill.identifier,
+        impacts: {
+          tax_impact: bill.nh_analysis.tax_impact ? {
+            summary: bill.nh_analysis.tax_impact.summary
+          } : null,
+          budget_impact: bill.nh_analysis.budget_impact ? {
+            summary: bill.nh_analysis.budget_impact.summary
+          } : null,
+          societal_impact: bill.nh_analysis.societal_impact ? {
+            summary: bill.nh_analysis.societal_impact.summary
+          } : null
+        }
+      };
+    });
+    
+    const billsWithAnalysis = (await Promise.all(billPromises)).filter(bill => bill !== null);
+    
+    return new Response(JSON.stringify({
+      highlighted_bills: billsWithAnalysis
+    }), {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        ...corsHeaders,
+      },
+    });
+  } catch (error) {
+    console.error(`Error getting highlighted bills analysis: ${error.message}`);
+    
+    return new Response(JSON.stringify({ error: 'Failed to retrieve highlighted bills analysis' }), {
+      status: 500,
+      headers: {
+        'Content-Type': 'application/json',
+        ...corsHeaders,
+      },
+    });
+  }
+}
+
+/**
+ * Get all analysis summaries
+ * @param {Object} env - Environment variables with KV binding
+ * @param {Object} corsHeaders - CORS headers to include in response
+ * @returns {Response} - JSON response with all analysis summaries
+ */
+async function getAllAnalysisSummaries(env, corsHeaders) {
+  try {
+    // Get analysis summaries
+    const summaries = await env.NH_LEGISLATIVE_METADATA.get('analysis_summaries', { type: 'json' });
+    
+    if (!summaries) {
+      return new Response(JSON.stringify({ 
+        analysis_summaries: {
+          tax_impact: [],
+          budget_impact: [],
+          societal_impact: [],
+          institutional_alignment: []
+        }
+      }), {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
+          ...corsHeaders,
+        },
+      });
+    }
+    
+    return new Response(JSON.stringify({
+      analysis_summaries: summaries
+    }), {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        ...corsHeaders,
+      },
+    });
+  } catch (error) {
+    console.error(`Error getting all analysis summaries: ${error.message}`);
+    
+    return new Response(JSON.stringify({ error: 'Failed to retrieve analysis summaries' }), {
+      status: 500,
+      headers: {
+        'Content-Type': 'application/json',
+        ...corsHeaders,
+      },
+    });
+  }
+}
+
+// Add the analysis route to your main fetch handler in the API Gateway
+// Example:
+/*
+if (pathname.startsWith('/api/analysis')) {
+  return await handleAnalysisRequest(request, env, corsHeaders);
+}
+*/

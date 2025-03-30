@@ -1,0 +1,849 @@
+// nh-data-collector.js
+// Scheduled Cloudflare Worker to fetch and store New Hampshire legislative data
+
+const NH_CONFIG = require('./nh-config');
+
+/**
+ * Main handler for scheduled events
+ * @param {Object} event - Cloudflare scheduled event
+ * @param {Object} env - Environment variables
+ * @param {Object} ctx - Execution context
+ */
+export default {
+  async scheduled(event, env, ctx) {
+    console.log(`Starting NH legislative data collection: ${new Date().toISOString()}`);
+    
+    try {
+      // Get the last update timestamp
+      const lastUpdateTimestamp = await getLastUpdateTimestamp(env);
+      
+      // Process all NH legislative updates
+      await processNHUpdates(lastUpdateTimestamp, env);
+      
+      // Collect representative data for accountability metrics
+      await collectRepresentativeData(env);
+      
+      // Update committee attendance records
+      await updateCommitteeAttendance(env);
+      
+      console.log(`Completed NH data collection: ${new Date().toISOString()}`);
+    } catch (error) {
+      console.error(`Error in scheduled job: ${error.message}`);
+      // We could add additional error reporting here (e.g., send to a monitoring service)
+    }
+  }
+};
+
+/**
+ * Get the last update timestamp from KV
+ * @param {Object} env - Environment variables with KV binding
+ * @returns {string} - ISO timestamp of last successful update
+ */
+async function getLastUpdateTimestamp(env) {
+  try {
+    // Try to get existing timestamp
+    const storedTimestamp = await env.NH_LEGISLATIVE_METADATA.get('last_update_timestamp');
+    
+    if (storedTimestamp) {
+      return storedTimestamp;
+    }
+    
+    // If none exists, initialize with default (30 days ago)
+    const defaultDate = new Date();
+    defaultDate.setDate(defaultDate.getDate() - NH_CONFIG.LOOKBACK_DAYS);
+    const defaultTimestamp = defaultDate.toISOString();
+    
+    // Store the default timestamp
+    await env.NH_LEGISLATIVE_METADATA.put('last_update_timestamp', defaultTimestamp);
+    
+    return defaultTimestamp;
+  } catch (error) {
+    console.error(`Error getting last update timestamp: ${error.message}`);
+    
+    // Fallback to default timestamp if there's an error
+    const defaultDate = new Date();
+    defaultDate.setDate(defaultDate.getDate() - NH_CONFIG.LOOKBACK_DAYS);
+    return defaultDate.toISOString();
+  }
+}
+
+/**
+ * Process updates for New Hampshire
+ * @param {string} lastUpdateTimestamp - ISO timestamp of last successful update
+ * @param {Object} env - Environment variables with KV binding
+ */
+async function processNHUpdates(lastUpdateTimestamp, env) {
+  console.log(`Processing NH updates since ${lastUpdateTimestamp}`);
+  
+  try {
+    // 1. Fetch and update bills
+    await updateBills(lastUpdateTimestamp, env);
+    
+    // 2. Fetch and update legislators
+    await updateLegislators(env);
+    
+    // 3. Fetch and update committees
+    await updateCommittees(env);
+    
+    // 4. Update the last update timestamp
+    const newTimestamp = new Date().toISOString();
+    await env.NH_LEGISLATIVE_METADATA.put('last_update_timestamp', newTimestamp);
+    
+    console.log(`Completed NH updates, new timestamp: ${newTimestamp}`);
+  } catch (error) {
+    console.error(`Error processing NH updates: ${error.message}`);
+    throw error;
+  }
+}
+
+/**
+ * Fetch and update NH bills
+ * @param {string} lastUpdateTimestamp - ISO timestamp of last successful update
+ * @param {Object} env - Environment variables with KV binding
+ */
+async function updateBills(lastUpdateTimestamp, env) {
+  let page = 1;
+  let hasMorePages = true;
+  let newestUpdateTimestamp = lastUpdateTimestamp;
+  const stateCode = NH_CONFIG.STATE_CODE;
+  
+  while (hasMorePages) {
+    try {
+      // Fetch bills updated since the last update
+      const response = await fetchBillUpdates(stateCode, lastUpdateTimestamp, page);
+      
+      if (!response.results || response.results.length === 0) {
+        hasMorePages = false;
+        continue;
+      }
+      
+      // Update the newest timestamp if we have newer bills
+      if (response.results.length > 0) {
+        const newestBillUpdate = response.results.reduce((newest, bill) => {
+          return new Date(bill.updated_at) > new Date(newest.updated_at) ? bill : newest;
+        });
+        
+        if (new Date(newestBillUpdate.updated_at) > new Date(newestUpdateTimestamp)) {
+          newestUpdateTimestamp = newestBillUpdate.updated_at;
+        }
+      }
+      
+      // Process each bill
+      for (const bill of response.results) {
+        await processBill(bill, env);
+      }
+      
+      // Check if there are more pages
+      hasMorePages = response.pagination.total_pages > page;
+      page++;
+      
+      // Respect rate limits by adding a small delay between pages
+      if (hasMorePages) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+    } catch (error) {
+      console.error(`Error processing NH bill updates, page ${page}: ${error.message}`);
+      hasMorePages = false; // Stop on error
+    }
+  }
+}
+
+/**
+ * Process and store a single bill
+ * @param {Object} bill - Bill data from API
+ * @param {Object} env - Environment variables with KV binding
+ */
+async function processBill(bill, env) {
+  try {
+    // Calculate bill's category based on title/subjects
+    const category = determineBillCategory(bill);
+    
+    // Add additional bill metadata for NH specific tracking
+    const enhancedBill = {
+      ...bill,
+      nh_category: category,
+      nh_accountability: {
+        sponsor_info: extractSponsorAccountability(bill),
+        voting_records: extractVotingRecords(bill)
+      }
+    };
+    
+    // Store the enhanced bill
+    const billKey = `bill:${bill.identifier}`;
+    await env.NH_LEGISLATIVE_DATA.put(billKey, JSON.stringify(enhancedBill));
+    
+    // Update bill indexes
+    await updateBillIndexes(bill, category, env);
+  } catch (error) {
+    console.error(`Error processing bill ${bill.identifier}: ${error.message}`);
+  }
+}
+
+/**
+ * Determine bill category based on content
+ * @param {Object} bill - Bill data
+ * @returns {string} - Category name
+ */
+function determineBillCategory(bill) {
+  // This is a simplified categorization logic
+  // In a production system, this would be more sophisticated,
+  // possibly using keyword analysis or machine learning
+  
+  const title = bill.title ? bill.title.toLowerCase() : '';
+  const subjects = bill.subject || [];
+  
+  const categoryMapping = {
+    'education': ['education', 'school', 'student', 'teacher', 'university', 'college'],
+    'healthcare': ['health', 'medical', 'insurance', 'hospital', 'medicaid', 'medicare'],
+    'transportation': ['transportation', 'highway', 'road', 'vehicle', 'driver', 'transit'],
+    'environment': ['environment', 'pollution', 'conservation', 'energy', 'climate', 'emission'],
+    'taxation': ['tax', 'revenue', 'budget', 'fiscal', 'funding'],
+    'criminal justice': ['criminal', 'justice', 'penalty', 'prison', 'police', 'law enforcement'],
+    'elections': ['election', 'voting', 'ballot', 'campaign', 'voter'],
+    'local government': ['municipal', 'town', 'city', 'local', 'zoning'],
+    'state government': ['state', 'agency', 'department', 'commission', 'government'],
+    'economic development': ['economic', 'business', 'job', 'employment', 'commerce', 'industry'],
+    'labor': ['labor', 'worker', 'employment', 'wage', 'union', 'workplace']
+  };
+  
+  // Check each category
+  for (const [category, keywords] of Object.entries(categoryMapping)) {
+    // Check if any keyword is in the title
+    if (keywords.some(keyword => title.includes(keyword))) {
+      return category;
+    }
+    
+    // Check if any subject matches
+    if (subjects.some(subject => 
+      keywords.some(keyword => subject.toLowerCase().includes(keyword))
+    )) {
+      return category;
+    }
+  }
+  
+  // Default category if no match found
+  return 'other';
+}
+
+/**
+ * Extract sponsor accountability data from bill
+ * @param {Object} bill - Bill data
+ * @returns {Object} - Sponsor accountability metrics
+ */
+function extractSponsorAccountability(bill) {
+  const sponsors = bill.sponsors || [];
+  const sponsorInfo = sponsors.map(sponsor => ({
+    name: sponsor.name,
+    id: sponsor.id,
+    classification: sponsor.classification,
+    district: sponsor.district,
+    party: sponsor.party
+  }));
+  
+  return {
+    sponsors: sponsorInfo,
+    primary_sponsor: sponsors.find(s => s.classification === 'primary') || null,
+    total_sponsors: sponsors.length
+  };
+}
+
+/**
+ * Extract voting records from bill
+ * @param {Object} bill - Bill data
+ * @returns {Array} - Voting records by representative
+ */
+function extractVotingRecords(bill) {
+  const votes = bill.votes || [];
+  const votingRecords = [];
+  
+  for (const vote of votes) {
+    const voteDate = vote.date;
+    const motionText = vote.motion_text;
+    
+    // Process each type of vote (yes, no, absent, etc.)
+    for (const voteType of ['yes', 'no', 'absent', 'excused', 'not_voting']) {
+      const voters = vote[voteType] || [];
+      
+      for (const voter of voters) {
+        votingRecords.push({
+          legislator_id: voter.id,
+          legislator_name: voter.name,
+          vote_type: voteType,
+          date: voteDate,
+          motion: motionText
+        });
+      }
+    }
+  }
+  
+  return votingRecords;
+}
+
+/**
+ * Update bill indexes for efficient querying
+ * @param {Object} bill - Bill data
+ * @param {string} category - Bill category
+ * @param {Object} env - Environment variables with KV binding
+ */
+async function updateBillIndexes(bill, category, env) {
+  try {
+    // 1. Update session index
+    const sessionKey = `index:session:${bill.session}`;
+    let sessionBills = await env.NH_LEGISLATIVE_DATA.get(sessionKey, { type: 'json' }) || [];
+    
+    if (!sessionBills.includes(bill.identifier)) {
+      sessionBills.push(bill.identifier);
+      await env.NH_LEGISLATIVE_DATA.put(sessionKey, JSON.stringify(sessionBills));
+    }
+    
+    // 2. Update category index
+    const categoryKey = `index:category:${category}`;
+    let categoryBills = await env.NH_LEGISLATIVE_DATA.get(categoryKey, { type: 'json' }) || [];
+    
+    if (!categoryBills.includes(bill.identifier)) {
+      categoryBills.push(bill.identifier);
+      await env.NH_LEGISLATIVE_DATA.put(categoryKey, JSON.stringify(categoryBills));
+    }
+    
+    // 3. Update sponsor indexes
+    const sponsors = bill.sponsors || [];
+    for (const sponsor of sponsors) {
+      if (!sponsor.id) continue;
+      
+      const sponsorKey = `index:sponsor:${sponsor.id}`;
+      let sponsorBills = await env.NH_LEGISLATIVE_DATA.get(sponsorKey, { type: 'json' }) || [];
+      
+      if (!sponsorBills.includes(bill.identifier)) {
+        sponsorBills.push(bill.identifier);
+        await env.NH_LEGISLATIVE_DATA.put(sponsorKey, JSON.stringify(sponsorBills));
+      }
+    }
+  } catch (error) {
+    console.error(`Error updating indexes for bill ${bill.identifier}: ${error.message}`);
+  }
+}
+
+/**
+ * Fetch bill updates from the OpenStates API
+ * @param {string} state - State code
+ * @param {string} updatedSince - ISO timestamp to filter bills by
+ * @param {number} page - Page number for pagination
+ * @returns {Object} - API response with results and pagination info
+ */
+async function fetchBillUpdates(state, updatedSince, page = 1) {
+  const url = new URL(`${NH_CONFIG.OPENSTATES_API_URL}/bills`);
+  
+  // Add query parameters
+  url.searchParams.append('jurisdiction', state);
+  url.searchParams.append('updated_since', updatedSince);
+  url.searchParams.append('per_page', '20');
+  url.searchParams.append('page', page.toString());
+  
+  const response = await fetch(url.toString(), {
+    headers: {
+      'X-API-Key': OPENSTATES_API_KEY,
+      'Accept': 'application/json',
+    },
+  });
+  
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`API request failed with status ${response.status}: ${errorText}`);
+  }
+  
+  return await response.json();
+}
+
+/**
+ * Fetch and update NH legislators
+ * @param {Object} env - Environment variables with KV binding
+ */
+async function updateLegislators(env) {
+  try {
+    const stateCode = NH_CONFIG.STATE_CODE;
+    
+    // Fetch all current legislators
+    const url = new URL(`${NH_CONFIG.OPENSTATES_API_URL}/people`);
+    url.searchParams.append('jurisdiction', stateCode);
+    url.searchParams.append('per_page', '100');
+    
+    const response = await fetch(url.toString(), {
+      headers: {
+        'X-API-Key': OPENSTATES_API_KEY,
+        'Accept': 'application/json',
+      },
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Failed to fetch NH legislators: ${response.statusText}`);
+    }
+    
+    const data = await response.json();
+    
+    // Process each legislator
+    for (const legislator of data.results) {
+      await processLegislator(legislator, env);
+    }
+    
+    // Store the list of all current legislator IDs
+    const legislatorIds = data.results.map(legislator => legislator.id);
+    await env.NH_LEGISLATIVE_METADATA.put('current_legislators', JSON.stringify(legislatorIds));
+    
+    console.log(`Updated ${data.results.length} NH legislators`);
+  } catch (error) {
+    console.error(`Error updating NH legislators: ${error.message}`);
+    throw error;
+  }
+}
+
+/**
+ * Process and store a single legislator
+ * @param {Object} legislator - Legislator data from API
+ * @param {Object} env - Environment variables with KV binding
+ */
+async function processLegislator(legislator, env) {
+  try {
+    // Add additional legislator metadata for NH specific tracking
+    const enhancedLegislator = {
+      ...legislator,
+      nh_accountability: {
+        attendance: 0, // Will be calculated later
+        vote_party_alignment: 0, // Will be calculated later
+        sponsored_bills: 0, // Will be calculated later
+        passed_bills: 0, // Will be calculated later
+        committee_attendance: 0 // Will be calculated later
+      }
+    };
+    
+    // Store the enhanced legislator
+    const legislatorKey = `legislator:${legislator.id}`;
+    await env.NH_LEGISLATIVE_DATA.put(legislatorKey, JSON.stringify(enhancedLegislator));
+    
+    // Update legislator indexes
+    await updateLegislatorIndexes(legislator, env);
+  } catch (error) {
+    console.error(`Error processing legislator ${legislator.id}: ${error.message}`);
+  }
+}
+
+/**
+ * Update legislator indexes for efficient querying
+ * @param {Object} legislator - Legislator data
+ * @param {Object} env - Environment variables with KV binding
+ */
+async function updateLegislatorIndexes(legislator, env) {
+  try {
+    // 1. Update party index
+    const party = legislator.party || 'Unknown';
+    const partyKey = `index:party:${party}`;
+    let partyMembers = await env.NH_LEGISLATIVE_DATA.get(partyKey, { type: 'json' }) || [];
+    
+    if (!partyMembers.includes(legislator.id)) {
+      partyMembers.push(legislator.id);
+      await env.NH_LEGISLATIVE_DATA.put(partyKey, JSON.stringify(partyMembers));
+    }
+    
+    // 2. Update district index
+    if (legislator.current_role && legislator.current_role.district) {
+      const district = legislator.current_role.district;
+      const districtKey = `index:district:${district}`;
+      let districtMembers = await env.NH_LEGISLATIVE_DATA.get(districtKey, { type: 'json' }) || [];
+      
+      if (!districtMembers.includes(legislator.id)) {
+        districtMembers.push(legislator.id);
+        await env.NH_LEGISLATIVE_DATA.put(districtKey, JSON.stringify(districtMembers));
+      }
+    }
+    
+    // 3. Update chamber index
+    if (legislator.current_role && legislator.current_role.chamber) {
+      const chamber = legislator.current_role.chamber;
+      const chamberKey = `index:chamber:${chamber}`;
+      let chamberMembers = await env.NH_LEGISLATIVE_DATA.get(chamberKey, { type: 'json' }) || [];
+      
+      if (!chamberMembers.includes(legislator.id)) {
+        chamberMembers.push(legislator.id);
+        await env.NH_LEGISLATIVE_DATA.put(chamberKey, JSON.stringify(chamberMembers));
+      }
+    }
+  } catch (error) {
+    console.error(`Error updating indexes for legislator ${legislator.id}: ${error.message}`);
+  }
+}
+
+/**
+ * Fetch and update NH committees
+ * @param {Object} env - Environment variables with KV binding
+ */
+async function updateCommittees(env) {
+  try {
+    const stateCode = NH_CONFIG.STATE_CODE;
+    
+    // Fetch all current committees
+    const url = new URL(`${NH_CONFIG.OPENSTATES_API_URL}/committees`);
+    url.searchParams.append('jurisdiction', stateCode);
+    url.searchParams.append('per_page', '100');
+    
+    const response = await fetch(url.toString(), {
+      headers: {
+        'X-API-Key': OPENSTATES_API_KEY,
+        'Accept': 'application/json',
+      },
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Failed to fetch NH committees: ${response.statusText}`);
+    }
+    
+    const data = await response.json();
+    
+    // Process each committee
+    for (const committee of data.results) {
+      await processCommittee(committee, env);
+    }
+    
+    // Store the list of all current committee IDs
+    const committeeIds = data.results.map(committee => committee.id);
+    await env.NH_LEGISLATIVE_METADATA.put('current_committees', JSON.stringify(committeeIds));
+    
+    console.log(`Updated ${data.results.length} NH committees`);
+  } catch (error) {
+    console.error(`Error updating NH committees: ${error.message}`);
+    throw error;
+  }
+}
+
+/**
+ * Process and store a single committee
+ * @param {Object} committee - Committee data from API
+ * @param {Object} env - Environment variables with KV binding
+ */
+async function processCommittee(committee, env) {
+  try {
+    // Add additional committee metadata for NH specific tracking
+    const enhancedCommittee = {
+      ...committee,
+      nh_tracked: NH_CONFIG.TRACKED_COMMITTEES.some(tc => tc.id === committee.id),
+      nh_meetings: [] // Will be populated later
+    };
+    
+    // Store the enhanced committee
+    const committeeKey = `committee:${committee.id}`;
+    await env.NH_LEGISLATIVE_DATA.put(committeeKey, JSON.stringify(enhancedCommittee));
+    
+    // Update committee indexes
+    await updateCommitteeIndexes(committee, env);
+  } catch (error) {
+    console.error(`Error processing committee ${committee.id}: ${error.message}`);
+  }
+}
+
+/**
+ * Update committee indexes for efficient querying
+ * @param {Object} committee - Committee data
+ * @param {Object} env - Environment variables with KV binding
+ */
+async function updateCommitteeIndexes(committee, env) {
+  try {
+    // 1. Update chamber index
+    if (committee.chamber) {
+      const chamberKey = `index:committee:chamber:${committee.chamber}`;
+      let chamberCommittees = await env.NH_LEGISLATIVE_DATA.get(chamberKey, { type: 'json' }) || [];
+      
+      if (!chamberCommittees.includes(committee.id)) {
+        chamberCommittees.push(committee.id);
+        await env.NH_LEGISLATIVE_DATA.put(chamberKey, JSON.stringify(chamberCommittees));
+      }
+    }
+    
+    // 2. Update member indexes
+    const members = committee.members || [];
+    for (const member of members) {
+      if (!member.id) continue;
+      
+      const memberKey = `index:legislator:committees:${member.id}`;
+      let memberCommittees = await env.NH_LEGISLATIVE_DATA.get(memberKey, { type: 'json' }) || [];
+      
+      if (!memberCommittees.includes(committee.id)) {
+        memberCommittees.push(committee.id);
+        await env.NH_LEGISLATIVE_DATA.put(memberKey, JSON.stringify(memberCommittees));
+      }
+    }
+  } catch (error) {
+    console.error(`Error updating indexes for committee ${committee.id}: ${error.message}`);
+  }
+}
+
+/**
+ * Collect and update accountability metrics for representatives
+ * @param {Object} env - Environment variables with KV binding
+ */
+async function collectRepresentativeData(env) {
+  try {
+    // Get all current legislators
+    const legislatorIds = JSON.parse(
+      await env.NH_LEGISLATIVE_METADATA.get('current_legislators')
+    ) || [];
+    
+    for (const legislatorId of legislatorIds) {
+      await updateLegislatorAccountability(legislatorId, env);
+    }
+    
+    console.log(`Updated accountability metrics for ${legislatorIds.length} legislators`);
+  } catch (error) {
+    console.error(`Error collecting representative data: ${error.message}`);
+  }
+}
+
+/**
+ * Update accountability metrics for a single legislator
+ * @param {string} legislatorId - Legislator ID
+ * @param {Object} env - Environment variables with KV binding
+ */
+async function updateLegislatorAccountability(legislatorId, env) {
+  try {
+    // Get the legislator data
+    const legislatorKey = `legislator:${legislatorId}`;
+    const legislator = JSON.parse(
+      await env.NH_LEGISLATIVE_DATA.get(legislatorKey)
+    );
+    
+    if (!legislator) {
+      console.warn(`Legislator ${legislatorId} not found`);
+      return;
+    }
+    
+    // Calculate attendance metric
+    const attendance = await calculateAttendance(legislatorId, env);
+    
+    // Calculate party alignment metric
+    const partyAlignment = await calculatePartyAlignment(legislatorId, legislator.party, env);
+    
+    // Calculate sponsored bills metrics
+    const sponsoredBills = await getSponsoredBills(legislatorId, env);
+    const passedBills = sponsoredBills.filter(billId => 
+      isBillPassed(billId, env)
+    );
+    
+    // Calculate committee attendance
+    const committeeAttendance = await calculateCommitteeAttendance(legislatorId, env);
+    
+    // Update the legislator with new accountability metrics
+    legislator.nh_accountability = {
+      attendance,
+      vote_party_alignment: partyAlignment,
+      sponsored_bills: sponsoredBills.length,
+      passed_bills: passedBills.length,
+      committee_attendance: committeeAttendance
+    };
+    
+    // Store the updated legislator
+    await env.NH_LEGISLATIVE_DATA.put(legislatorKey, JSON.stringify(legislator));
+  } catch (error) {
+    console.error(`Error updating accountability for legislator ${legislatorId}: ${error.message}`);
+  }
+}
+
+/**
+ * Calculate attendance rate for a legislator
+ * @param {string} legislatorId - Legislator ID
+ * @param {Object} env - Environment variables with KV binding
+ * @returns {number} - Attendance rate (0-100)
+ */
+async function calculateAttendance(legislatorId, env) {
+  // Implementation would involve analyzing voting records
+  // to determine how many votes the legislator participated in
+  // compared to total votes for their chamber.
+  
+  // This is a simplified placeholder implementation
+  return 95; // Example value
+}
+
+/**
+ * Calculate party alignment for a legislator
+ * @param {string} legislatorId - Legislator ID
+ * @param {string} party - Legislator's party
+ * @param {Object} env - Environment variables with KV binding
+ * @returns {number} - Party alignment rate (0-100)
+ */
+async function calculatePartyAlignment(legislatorId, party, env) {
+  // Implementation would involve analyzing voting records
+  // to determine how often the legislator votes with their party.
+  
+  // This is a simplified placeholder implementation
+  return 85; // Example value
+}
+
+/**
+ * Get bills sponsored by a legislator
+ * @param {string} legislatorId - Legislator ID
+ * @param {Object} env - Environment variables with KV binding
+ * @returns {Array} - Array of bill IDs sponsored by the legislator
+ */
+async function getSponsoredBills(legislatorId, env) {
+  try {
+    const sponsorKey = `index:sponsor:${legislatorId}`;
+    return JSON.parse(
+      await env.NH_LEGISLATIVE_DATA.get(sponsorKey)
+    ) || [];
+  } catch (error) {
+    console.error(`Error getting sponsored bills for ${legislatorId}: ${error.message}`);
+    return [];
+  }
+}
+
+/**
+ * Check if a bill has passed
+ * @param {string} billId - Bill ID
+ * @param {Object} env - Environment variables with KV binding
+ * @returns {boolean} - Whether the bill has passed
+ */
+async function isBillPassed(billId, env) {
+  try {
+    const billKey = `bill:${billId}`;
+    const bill = JSON.parse(await env.NH_LEGISLATIVE_DATA.get(billKey));
+    
+    if (!bill) return false;
+    
+    // Check if the bill has a passed action
+    const actions = bill.actions || [];
+    return actions.some(action => {
+      const classification = action.classification || [];
+      return classification.includes('passage');
+    });
+  } catch (error) {
+    console.error(`Error checking if bill ${billId} passed: ${error.message}`);
+    return false;
+  }
+}
+
+/**
+ * Calculate committee attendance for a legislator
+ * @param {string} legislatorId - Legislator ID
+ * @param {Object} env - Environment variables with KV binding
+ * @returns {number} - Committee attendance rate (0-100)
+ */
+async function calculateCommitteeAttendance(legislatorId, env) {
+  // This would typically involve fetching committee meeting records
+  // and checking the legislator's attendance.
+  
+  // This is a simplified placeholder implementation
+  return 90; // Example value
+}
+
+/**
+ * Update committee attendance records
+ * @param {Object} env - Environment variables with KV binding
+ */
+async function updateCommitteeAttendance(env) {
+  try {
+    // Get tracked committees
+    const committeeIds = JSON.parse(
+      await env.NH_LEGISLATIVE_METADATA.get('current_committees')
+    ) || [];
+    
+    const trackedCommittees = NH_CONFIG.TRACKED_COMMITTEES.map(tc => tc.id);
+    
+    // For each tracked committee, collect meeting information
+    for (const committeeId of committeeIds) {
+      if (!trackedCommittees.includes(committeeId)) continue;
+      
+      await updateCommitteeMeetings(committeeId, env);
+    }
+    
+    console.log(`Updated attendance for ${trackedCommittees.length} committees`);
+  } catch (error) {
+    console.error(`Error updating committee attendance: ${error.message}`);
+  }
+}
+
+/**
+ * Update meeting information for a committee
+ * @param {string} committeeId - Committee ID
+ * @param {Object} env - Environment variables with KV binding
+ */
+async function updateCommitteeMeetings(committeeId, env) {
+  try {
+    // Get the committee data
+    const committeeKey = `committee:${committeeId}`;
+    const committee = JSON.parse(
+      await env.NH_LEGISLATIVE_DATA.get(committeeKey)
+    );
+    
+    if (!committee) {
+      console.warn(`Committee ${committeeId} not found`);
+      return;
+    }
+    
+    // This would typically involve scraping or querying an API
+    // to get committee meeting information.
+    
+    // This is a simplified placeholder implementation
+    const fakeMeetings = [
+      {
+        date: '2023-03-15',
+        title: 'Regular Committee Meeting',
+        attendance: {
+          present: committee.members.slice(0, Math.floor(committee.members.length * 0.9)).map(m => m.id),
+          absent: committee.members.slice(Math.floor(committee.members.length * 0.9)).map(m => m.id)
+        }
+      },
+      {
+        date: '2023-03-01',
+        title: 'Bill Hearing',
+        attendance: {
+          present: committee.members.slice(0, Math.floor(committee.members.length * 0.85)).map(m => m.id),
+          absent: committee.members.slice(Math.floor(committee.members.length * 0.85)).map(m => m.id)
+        }
+      }
+    ];
+    
+    // Update the committee with meeting information
+    committee.nh_meetings = fakeMeetings;
+    
+    // Store the updated committee
+    await env.NH_LEGISLATIVE_DATA.put(committeeKey, JSON.stringify(committee));
+    
+    // Update attendance records for each legislator
+    for (const meeting of fakeMeetings) {
+      for (const legislatorId of meeting.attendance.present) {
+        await updateLegislatorAttendanceRecord(legislatorId, committeeId, meeting.date, true, env);
+      }
+      
+      for (const legislatorId of meeting.attendance.absent) {
+        await updateLegislatorAttendanceRecord(legislatorId, committeeId, meeting.date, false, env);
+      }
+    }
+  } catch (error) {
+    console.error(`Error updating meetings for committee ${committeeId}: ${error.message}`);
+  }
+}
+
+/**
+ * Update attendance record for a legislator
+ * @param {string} legislatorId - Legislator ID
+ * @param {string} committeeId - Committee ID
+ * @param {string} date - Meeting date
+ * @param {boolean} present - Whether the legislator was present
+ * @param {Object} env - Environment variables with KV binding
+ */
+async function updateLegislatorAttendanceRecord(legislatorId, committeeId, date, present, env) {
+  try {
+    const attendanceKey = `attendance:${legislatorId}`;
+    let attendanceRecord = JSON.parse(
+      await env.NH_LEGISLATIVE_DATA.get(attendanceKey)
+    ) || [];
+    
+    // Add new attendance record
+    attendanceRecord.push({
+      committee_id: committeeId,
+      date,
+      present
+    });
+    
+    // Store the updated attendance record
+    await env.NH_LEGISLATIVE_DATA.put(attendanceKey, JSON.stringify(attendanceRecord));
+  } catch (error) {
+    console.error(`Error updating attendance for legislator ${legislatorId}: ${error.message}`);
+  }
+}

@@ -1,0 +1,540 @@
+/* src/App.css */
+
+/* Base styles */
+:root {
+  --primary: #2563eb;
+  --primary-dark: #1d4ed8;
+  --secondary: #475569;
+  --accent: #f59e0b;
+  --light: #f8fafc;
+  --dark: #1e293b;
+  --success: #10b981;
+  --error: #ef4444;
+  --gray-100: #f1f5f9;
+  --gray-200: #e2e8f0;
+  --gray-300: #cbd5e1;
+  --gray-400: #94a3b8;
+  --gray-500: #64748b;
+  --gray-600: #475569;
+  --gray-700: #334155;
+  --gray-800: #1e293b;
+  --gray-900: #0f172a;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen,
+    Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+  line-height: 1.6;
+  color: var(--gray-800);
+  background-color: var(--light);
+}
+
+a {
+  color: var(--primary);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+button {
+  cursor: pointer;
+  background-color: var(--primary);
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 4px;
+  font-size: 16px;
+  transition: background-color 0.2s;
+}
+
+button:hover {
+  background-color: var(--primary-dark);
+}
+
+button:disabled {
+  background-color: var(--gray-400);
+  cursor: not-allowed;
+}
+
+/* Layout components */
+.app-container {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-header {
+  background-color: var(--primary);
+  color: white;
+  padding: 1rem 2rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.app-header h1 {
+  margin: 0;
+  font-size: 1.8rem;
+}
+
+.app-header nav ul {
+  display: flex;
+  list-style: none;
+}
+
+.app-header nav ul li {
+  margin-left: 1.5rem;
+}
+
+.app-header nav ul li a {
+  color: white;
+  text-decoration: none;
+  font-weight: 500;
+  transition: opacity 0.2s;
+}
+
+.app-header nav ul li a:hover {
+  opacity: 0.8;
+  text-decoration: none;
+}
+
+.app-content {
+  flex: 1;
+  padding: 2rem;
+  max-width: 1200px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.app-footer {
+  background-color: var(--gray-800);
+  color: white;
+  padding: 1.5rem 2rem;
+  text-align: center;
+}
+
+/* Home page components */
+.hero {
+  background-color: var(--gray-100);
+  padding: 3rem 2rem;
+  border-radius: 8px;
+  margin-bottom: 2rem;
+  text-align: center;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+.hero h2 {
+  font-size: 2.2rem;
+  margin-bottom: 1rem;
+  color: var(--dark);
+}
+
+.hero p {
+  font-size: 1.2rem;
+  color: var(--gray-600);
+  max-width: 700px;
+  margin: 0 auto;
+}
+
+.states-list h3 {
+  margin-bottom: 1.5rem;
+  text-align: center;
+  font-size: 1.6rem;
+  color: var(--gray-700);
+}
+
+.state-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 1.5rem;
+}
+
+.state-card {
+  background-color: white;
+  border-radius: 8px;
+  padding: 1.5rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  transition: transform 0.2s, box-shadow 0.2s;
+  display: block;
+  color: var(--gray-800);
+  text-decoration: none;
+}
+
+.state-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  text-decoration: none;
+}
+
+.state-card h4 {
+  font-size: 1.3rem;
+  margin-bottom: 0.5rem;
+  color: var(--primary);
+}
+
+.state-card p {
+  color: var(--gray-600);
+  font-size: 0.9rem;
+}
+
+/* State page components */
+.state-header {
+  margin-bottom: 2rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--gray-200);
+}
+
+.state-header h2 {
+  font-size: 2rem;
+  color: var(--gray-800);
+}
+
+.state-header p {
+  color: var(--gray-600);
+  font-size: 1.1rem;
+}
+
+.sessions-list h3 {
+  margin-bottom: 1.5rem;
+  font-size: 1.6rem;
+  color: var(--gray-700);
+}
+
+.session-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 1.5rem;
+}
+
+.session-card {
+  background-color: white;
+  border-radius: 8px;
+  padding: 1.5rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  transition: transform 0.2s, box-shadow 0.2s;
+  display: block;
+  color: var(--gray-800);
+  text-decoration: none;
+}
+
+.session-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  text-decoration: none;
+}
+
+.session-card h4 {
+  font-size: 1.3rem;
+  margin-bottom: 0.5rem;
+  color: var(--primary);
+}
+
+.session-card p {
+  color: var(--gray-600);
+  font-size: 0.9rem;
+  margin-bottom: 0.3rem;
+}
+
+.session-type {
+  display: inline-block;
+  background-color: var(--gray-200);
+  color: var(--gray-700);
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  margin-top: 0.5rem;
+}
+
+/* Session page components */
+.session-header {
+  margin-bottom: 2rem;
+}
+
+.session-header a {
+  display: inline-block;
+  margin-bottom: 1rem;
+  font-size: 1rem;
+}
+
+.session-header h2 {
+  font-size: 1.8rem;
+  color: var(--gray-800);
+}
+
+.bills-container {
+  background-color: white;
+  border-radius: 8px;
+  padding: 1.5rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.bills-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 1.5rem;
+}
+
+.bills-table th,
+.bills-table td {
+  padding: 0.75rem 1rem;
+  text-align: left;
+  border-bottom: 1px solid var(--gray-200);
+}
+
+.bills-table th {
+  font-weight: 600;
+  color: var(--gray-700);
+  background-color: var(--gray-100);
+}
+
+.bills-table tbody tr:hover {
+  background-color: var(--gray-100);
+}
+
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 1.5rem;
+}
+
+.pagination button {
+  margin: 0 0.25rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.9rem;
+}
+
+.page-info {
+  margin: 0 1rem;
+  color: var(--gray-600);
+}
+
+/* Bill detail page components */
+.bill-header {
+  margin-bottom: 2rem;
+}
+
+.bill-header a {
+  display: inline-block;
+  margin-bottom: 1rem;
+  font-size: 1rem;
+}
+
+.bill-details {
+  background-color: white;
+  border-radius: 8px;
+  padding: 2rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.bill-details h2 {
+  font-size: 1.8rem;
+  color: var(--gray-800);
+  margin-bottom: 1.5rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--gray-200);
+}
+
+.bill-meta {
+  margin-bottom: 2rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+}
+
+.bill-meta p {
+  margin-bottom: 0.5rem;
+}
+
+.bill-abstract,
+.bill-sponsors,
+.bill-actions,
+.bill-sources {
+  margin-bottom: 2rem;
+}
+
+.bill-abstract h3,
+.bill-sponsors h3,
+.bill-actions h3,
+.bill-sources h3 {
+  font-size: 1.4rem;
+  color: var(--gray-700);
+  margin-bottom: 1rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--gray-200);
+}
+
+.timeline {
+  list-style: none;
+  position: relative;
+  padding-left: 2rem;
+}
+
+.timeline::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background-color: var(--gray-300);
+}
+
+.timeline-item {
+  position: relative;
+  margin-bottom: 1.5rem;
+  padding-left: 1.5rem;
+}
+
+.timeline-item::before {
+  content: '';
+  position: absolute;
+  left: -5px;
+  top: 6px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background-color: var(--primary);
+}
+
+.timeline-date {
+  font-size: 0.9rem;
+  color: var(--gray-500);
+  margin-bottom: 0.25rem;
+}
+
+.timeline-content p {
+  margin-bottom: 0.25rem;
+}
+
+.action-type {
+  display: inline-block;
+  background-color: var(--gray-200);
+  color: var(--gray-700);
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.8rem;
+}
+
+/* Search page components */
+.search-form {
+  background-color: white;
+  border-radius: 8px;
+  padding: 1.5rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  margin-bottom: 2rem;
+}
+
+.search-controls {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.search-input {
+  flex: 1;
+  min-width: 250px;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--gray-300);
+  border-radius: 4px;
+  font-size: 1rem;
+}
+
+.state-filter {
+  min-width: 150px;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--gray-300);
+  border-radius: 4px;
+  font-size: 1rem;
+  background-color: white;
+}
+
+.search-button {
+  min-width: 120px;
+}
+
+.search-results h3 {
+  margin-bottom: 1.5rem;
+  font-size: 1.6rem;
+  color: var(--gray-700);
+}
+
+.search-results > p {
+  margin-bottom: 1rem;
+  color: var(--gray-600);
+}
+
+/* About page components */
+.about-content {
+  background-color: white;
+  border-radius: 8px;
+  padding: 2rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.about-content p {
+  margin-bottom: 1.5rem;
+  font-size: 1.1rem;
+}
+
+.about-content h3 {
+  font-size: 1.4rem;
+  color: var(--gray-700);
+  margin: 2rem 0 1rem;
+}
+
+.about-content ul {
+  margin-bottom: 1.5rem;
+  padding-left: 2rem;
+}
+
+.about-content li {
+  margin-bottom: 0.5rem;
+}
+
+/* Utility classes */
+.error {
+  color: var(--error);
+  background-color: #fee2e2;
+  padding: 1rem;
+  border-radius: 4px;
+  margin-bottom: 1rem;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .app-header {
+    flex-direction: column;
+    padding: 1rem;
+  }
+  
+  .app-header h1 {
+    margin-bottom: 1rem;
+  }
+  
+  .app-content {
+    padding: 1rem;
+  }
+  
+  .search-controls {
+    flex-direction: column;
+  }
+  
+  .search-input, .state-filter, .search-button {
+    width: 100%;
+  }
+  
+  .bills-table {
+    display: block;
+    overflow-x: auto;
+  }
+}

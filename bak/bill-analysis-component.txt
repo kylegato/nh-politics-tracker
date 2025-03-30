@@ -1,0 +1,413 @@
+// bill-analysis.js
+// AI-powered analysis of NH legislative bills using Cloudflare Workers AI
+
+/**
+ * Configuration for bill analysis
+ */
+const ANALYSIS_CONFIG = {
+  // Cloudflare Workers AI model settings
+  CF_AI_MODEL: "@cf/meta/llama-3-8b-instruct", // Cloudflare's implementation of Llama 3
+  
+  // Analysis types
+  ANALYSIS_TYPES: [
+    'tax_impact', 
+    'societal_impact', 
+    'budget_impact',
+    'institutional_alignment'
+  ],
+  
+  // Rate limiting to manage costs
+  MAX_BILLS_PER_BATCH: 10,
+  RATE_LIMIT_DELAY: 2000, // 2 seconds between batches
+  
+  // Caching duration for analyses (7 days)
+  ANALYSIS_CACHE_TTL: 7 * 24 * 60 * 60,
+  
+  // Maximum token limits
+  MAX_INPUT_TOKENS: 4000,
+  MAX_OUTPUT_TOKENS: 1000
+};
+
+/**
+ * Main function to analyze a bill
+ * @param {Object} bill - The bill data from OpenStates API
+ * @param {Object} env - Environment variables with Workers AI binding
+ * @returns {Object} - Analysis results for the bill
+ */
+async function analyzeBill(bill, env) {
+  try {
+    // Check if we already have a recent analysis
+    const analysisKey = `analysis:${bill.id}`;
+    const existingAnalysis = await env.NH_LEGISLATIVE_DATA.get(analysisKey, { type: 'json' });
+    
+    // If we have a recent analysis, return it
+    if (existingAnalysis) {
+      console.log(`Using existing analysis for bill ${bill.id}`);
+      return existingAnalysis;
+    }
+    
+    // Prepare the full text for analysis
+    const billText = prepareBillText(bill);
+    
+    // If no meaningful text is available, skip analysis
+    if (!billText || billText.length < 100) {
+      console.warn(`Insufficient text for bill ${bill.id} to perform analysis`);
+      return {
+        id: bill.id,
+        analysis_error: "Insufficient bill text for analysis",
+        analysis_timestamp: new Date().toISOString()
+      };
+    }
+    
+    // Run analyses in parallel
+    const analysisPromises = ANALYSIS_CONFIG.ANALYSIS_TYPES.map(analysisType => 
+      performAnalysis(billText, analysisType, bill, env)
+    );
+    
+    const analysisResults = await Promise.all(analysisPromises);
+    
+    // Combine into a single analysis object
+    const completeAnalysis = {
+      id: bill.id,
+      bill_identifier: bill.identifier,
+      bill_title: bill.title,
+      analysis_timestamp: new Date().toISOString(),
+      analyses: {}
+    };
+    
+    // Add each analysis result to the complete analysis
+    analysisResults.forEach(result => {
+      if (result && result.type) {
+        completeAnalysis.analyses[result.type] = {
+          summary: result.summary,
+          details: result.details
+        };
+      }
+    });
+    
+    // Store in KV with TTL
+    await env.NH_LEGISLATIVE_DATA.put(
+      analysisKey, 
+      JSON.stringify(completeAnalysis),
+      { expirationTtl: ANALYSIS_CONFIG.ANALYSIS_CACHE_TTL }
+    );
+    
+    return completeAnalysis;
+  } catch (error) {
+    console.error(`Error analyzing bill ${bill.id}: ${error.message}`);
+    return {
+      id: bill.id,
+      analysis_error: error.message,
+      analysis_timestamp: new Date().toISOString()
+    };
+  }
+}
+
+/**
+ * Prepare bill text for analysis from various bill sources
+ * @param {Object} bill - The bill data
+ * @returns {string} - Prepared text for analysis
+ */
+function prepareBillText(bill) {
+  // Collect all text from the bill
+  const textSources = [];
+  
+  // Add title
+  if (bill.title) {
+    textSources.push(`TITLE: ${bill.title}`);
+  }
+  
+  // Add abstract/summary if available
+  if (bill.abstract) {
+    textSources.push(`ABSTRACT: ${bill.abstract}`);
+  }
+  
+  // Add description if available
+  if (bill.description) {
+    textSources.push(`DESCRIPTION: ${bill.description}`);
+  }
+  
+  // Add bill full text if available
+  if (bill.texts && bill.texts.length > 0) {
+    // Try to find the latest version with a text URL
+    const latestText = bill.texts
+      .sort((a, b) => new Date(b.date) - new Date(a.date))
+      .find(text => text.url);
+      
+    if (latestText) {
+      textSources.push(`FULL TEXT URL: ${latestText.url}`);
+    }
+  }
+  
+  // Add subjects/topics
+  if (bill.subject && bill.subject.length > 0) {
+    textSources.push(`SUBJECTS: ${bill.subject.join(', ')}`);
+  }
+  
+  // Add sponsor info
+  if (bill.sponsors && bill.sponsors.length > 0) {
+    const sponsorInfo = bill.sponsors.map(sponsor => 
+      `${sponsor.name} (${sponsor.classification})`
+    ).join(', ');
+    textSources.push(`SPONSORS: ${sponsorInfo}`);
+  }
+  
+  // Add latest action
+  if (bill.latest_action) {
+    textSources.push(`LATEST ACTION: ${bill.latest_action}`);
+  }
+  
+  // Combine all sources with newlines
+  return textSources.join('\n\n');
+}
+
+/**
+ * Perform a specific type of analysis on bill text
+ * @param {string} billText - The prepared bill text
+ * @param {string} analysisType - The type of analysis to perform
+ * @param {Object} bill - The original bill object for context
+ * @param {Object} env - Environment variables with Workers AI binding
+ * @returns {Object} - Analysis results
+ */
+async function performAnalysis(billText, analysisType, bill, env) {
+  try {
+    // Craft prompt based on analysis type
+    const { prompt, systemPrompt } = craftAnalysisPrompt(billText, analysisType, bill);
+    
+    // Trim input to fit token limits
+    const trimmedPrompt = trimToTokenLimit(prompt, ANALYSIS_CONFIG.MAX_INPUT_TOKENS);
+    
+    // Call Cloudflare Workers AI
+    const response = await env.AI.run(ANALYSIS_CONFIG.CF_AI_MODEL, {
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: trimmedPrompt }
+      ],
+      max_tokens: ANALYSIS_CONFIG.MAX_OUTPUT_TOKENS
+    });
+    
+    // Parse the response
+    return parseAnalysisResponse(response, analysisType);
+    
+  } catch (error) {
+    console.error(`Error in ${analysisType} analysis: ${error.message}`);
+    return {
+      type: analysisType,
+      summary: "Analysis failed",
+      details: `Error: ${error.message}`,
+      error: true
+    };
+  }
+}
+
+/**
+ * Craft appropriate prompts for each type of analysis
+ * @param {string} billText - The prepared bill text
+ * @param {string} analysisType - The type of analysis to perform
+ * @param {Object} bill - The original bill object for context
+ * @returns {Object} - Object containing prompt and system prompt
+ */
+function craftAnalysisPrompt(billText, analysisType, bill) {
+  // Base system prompt for all analyses
+  let systemPrompt = "You are an objective legislative analyst focusing only on facts and evidence. Analyze the provided bill text for New Hampshire legislation. Provide balanced, non-partisan analysis. Focus on concrete impacts rather than political opinions.";
+  
+  // Analysis-specific prompts
+  let prompt = "";
+  
+  switch(analysisType) {
+    case 'tax_impact':
+      systemPrompt += " Your task is to analyze the tax implications of this legislation.";
+      prompt = `Analyze the following New Hampshire bill for its potential tax impact. Consider:
+1. Does this bill create new taxes or modify existing ones?
+2. Which taxpayers would be affected (individuals, businesses, specific industries)?
+3. Estimated revenue changes if available
+4. Local vs. state tax implications
+
+Bill Information:
+${billText}
+
+Provide your analysis in this format:
+SUMMARY: A 1-2 sentence objective summary of the tax impact
+DETAILS: Bullet points of specific tax implications, supported by text from the bill
+CONFIDENCE: (High/Medium/Low) based on how explicitly the bill addresses tax matters`;
+      break;
+      
+    case 'societal_impact':
+      systemPrompt += " Your task is to analyze the societal implications of this legislation.";
+      prompt = `Analyze the following New Hampshire bill for its potential societal impact. Consider:
+1. Which populations or communities would be most affected?
+2. How might this change daily life for NH residents?
+3. Potential long-term social consequences
+4. How it might change access to services or opportunities
+
+Bill Information:
+${billText}
+
+Provide your analysis in this format:
+SUMMARY: A 1-2 sentence objective summary of the societal impact
+DETAILS: Bullet points of specific societal implications, supported by text from the bill
+CONFIDENCE: (High/Medium/Low) based on how explicitly the bill addresses societal matters`;
+      break;
+      
+    case 'budget_impact':
+      systemPrompt += " Your task is to analyze the budgetary implications of this legislation.";
+      prompt = `Analyze the following New Hampshire bill for its potential budget impact. Consider:
+1. Does this bill require new spending or reduce existing spending?
+2. Estimated costs or savings if mentioned
+3. Which government departments or programs would be affected?
+4. Potential long-term fiscal implications
+
+Bill Information:
+${billText}
+
+Provide your analysis in this format:
+SUMMARY: A 1-2 sentence objective summary of the budget impact
+DETAILS: Bullet points of specific budget implications, supported by text from the bill
+CONFIDENCE: (High/Medium/Low) based on how explicitly the bill addresses budget matters`;
+      break;
+      
+    case 'institutional_alignment':
+      systemPrompt += " Your task is to analyze how this legislation aligns with institutional or party goals, regardless of partisan affiliation.";
+      prompt = `Analyze the following New Hampshire bill for how it aligns with broader institutional or party goals. Consider:
+1. Does this bill align with any known legislative priorities in NH?
+2. How does it relate to previous legislation or ongoing policy initiatives?
+3. Does it represent a continuation or change in direction for state policy?
+4. Would this typically align with specific institutional goals (without partisan bias)?
+
+Bill Information:
+${billText}
+
+Provide your analysis in this format:
+SUMMARY: A 1-2 sentence objective summary of institutional alignment
+DETAILS: Bullet points on alignment with broader goals and initiatives, supported by context
+CONFIDENCE: (High/Medium/Low) based on how clearly this bill connects to known priorities`;
+      break;
+      
+    default:
+      systemPrompt += " Provide general analysis of this legislation.";
+      prompt = `Analyze the following New Hampshire bill in general terms:
+      
+Bill Information:
+${billText}
+
+Provide your analysis in a structured format with a summary and specific details.`;
+  }
+  
+  return { prompt, systemPrompt };
+}
+
+/**
+ * Parse the AI response into a structured format
+ * @param {Object} response - Raw response from Workers AI
+ * @param {string} analysisType - The type of analysis performed
+ * @returns {Object} - Structured analysis result
+ */
+function parseAnalysisResponse(response, analysisType) {
+  try {
+    // Extract the text content from the response
+    const responseText = response.response || response;
+    
+    // Parse for summary and details sections
+    let summary = "";
+    let details = "";
+    
+    // Look for SUMMARY: and DETAILS: sections
+    const summaryMatch = responseText.match(/SUMMARY:\s*(.*?)(?=DETAILS:|CONFIDENCE:|$)/s);
+    const detailsMatch = responseText.match(/DETAILS:\s*(.*?)(?=CONFIDENCE:|$)/s);
+    
+    if (summaryMatch && summaryMatch[1]) {
+      summary = summaryMatch[1].trim();
+    } else {
+      // If no explicit summary found, use the first paragraph
+      const firstParagraph = responseText.split('\n\n')[0];
+      summary = firstParagraph.trim();
+    }
+    
+    if (detailsMatch && detailsMatch[1]) {
+      details = detailsMatch[1].trim();
+    } else {
+      // If no explicit details section, use everything after the first paragraph
+      const paragraphs = responseText.split('\n\n');
+      if (paragraphs.length > 1) {
+        details = paragraphs.slice(1).join('\n\n').trim();
+      } else {
+        details = "No detailed analysis available.";
+      }
+    }
+    
+    return {
+      type: analysisType,
+      summary,
+      details
+    };
+  } catch (error) {
+    console.error(`Error parsing analysis response: ${error.message}`);
+    return {
+      type: analysisType,
+      summary: "Error parsing analysis",
+      details: "The analysis could not be properly parsed.",
+      error: true
+    };
+  }
+}
+
+/**
+ * Trim text to fit within token limits
+ * @param {string} text - The text to trim
+ * @param {number} maxTokens - Maximum number of tokens
+ * @returns {string} - Trimmed text
+ */
+function trimToTokenLimit(text, maxTokens) {
+  // Very rough approximation: ~4 chars per token for English text
+  const approxTokenLength = 4;
+  const maxChars = maxTokens * approxTokenLength;
+  
+  if (text.length <= maxChars) {
+    return text;
+  }
+  
+  // If we need to trim, keep the beginning and end,
+  // as bill details can be at either location
+  const halfMax = Math.floor(maxChars / 2);
+  const firstHalf = text.substring(0, halfMax);
+  const secondHalf = text.substring(text.length - halfMax);
+  
+  return `${firstHalf}\n\n[...content trimmed for length...]\n\n${secondHalf}`;
+}
+
+/**
+ * Process a batch of bills for analysis
+ * @param {Array} bills - Array of bills to analyze
+ * @param {Object} env - Environment variables with Workers AI binding
+ * @returns {Array} - Array of analysis results
+ */
+async function processBillBatch(bills, env) {
+  const results = [];
+  
+  // Process bills one at a time to manage resource usage
+  for (const bill of bills) {
+    try {
+      console.log(`Analyzing bill ${bill.id}: ${bill.title}`);
+      const analysisResult = await analyzeBill(bill, env);
+      results.push(analysisResult);
+      
+      // Add delay between bills
+      await new Promise(resolve => setTimeout(resolve, ANALYSIS_CONFIG.RATE_LIMIT_DELAY));
+    } catch (error) {
+      console.error(`Failed to analyze bill ${bill.id}: ${error.message}`);
+      results.push({
+        id: bill.id,
+        analysis_error: error.message,
+        analysis_timestamp: new Date().toISOString()
+      });
+    }
+  }
+  
+  return results;
+}
+
+module.exports = {
+  analyzeBill,
+  processBillBatch,
+  ANALYSIS_CONFIG
+};

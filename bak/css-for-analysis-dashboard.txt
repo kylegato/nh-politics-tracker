@@ -1,0 +1,279 @@
+/* BillAnalysisDashboard.css */
+
+.bill-analysis-dashboard {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 1.5rem;
+}
+
+.dashboard-header {
+  margin-bottom: 2rem;
+  text-align: center;
+}
+
+.dashboard-header h1 {
+  color: #1e293b;
+  font-size: 2rem;
+  margin-bottom: 0.5rem;
+}
+
+.subtitle {
+  color: #64748b;
+  font-size: 1.1rem;
+  margin-bottom: 1rem;
+}
+
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.5rem;
+}
+
+.back-button {
+  background-color: transparent;
+  border: 1px solid #e2e8f0;
+  color: #475569;
+  padding: 0.5rem 1rem;
+  font-size: 0.9rem;
+  border-radius: 0.375rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.back-button:hover {
+  background-color: #f8fafc;
+  color: #334155;
+}
+
+.description {
+  color: #64748b;
+  margin-bottom: 1.5rem;
+}
+
+/* Impact Filters */
+.impact-filters {
+  margin-bottom: 2rem;
+  background-color: #f8fafc;
+  padding: 1.5rem;
+  border-radius: 0.5rem;
+}
+
+.impact-filters h3 {
+  margin-bottom: 1rem;
+  font-size: 1.1rem;
+  color: #334155;
+}
+
+.impact-buttons {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.impact-button {
+  padding: 0.75rem 1.5rem;
+  border: 2px solid;
+  background-color: white;
+  border-radius: 0.375rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.impact-button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+}
+
+/* Bill Cards */
+.bill-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+  gap: 1.5rem;
+}
+
+.bill-card {
+  background-color: white;
+  border-radius: 0.5rem;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
+  overflow: hidden;
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+
+.bill-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+}
+
+.bill-header {
+  padding: 1.25rem;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.bill-header h3 {
+  margin: 0 0 0.5rem 0;
+  color: #1e293b;
+  font-size: 1.25rem;
+}
+
+.bill-title {
+  color: #475569;
+  font-size: 0.95rem;
+  line-height: 1.4;
+  display: block;
+}
+
+.bill-impacts {
+  padding: 1rem 0;
+}
+
+.impact-summary {
+  padding: 0.75rem 1.25rem;
+  margin-bottom: 0.5rem;
+  border-left: 4px solid;
+}
+
+.impact-summary:last-child {
+  margin-bottom: 0;
+}
+
+.impact-summary strong {
+  display: block;
+  margin-bottom: 0.25rem;
+  color: #334155;
+}
+
+.impact-summary p {
+  margin: 0;
+  color: #475569;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.bill-footer {
+  padding: 1rem 1.25rem;
+  border-top: 1px solid #e2e8f0;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.view-details {
+  background-color: #2563eb;
+  color: white;
+  border: none;
+  padding: 0.5rem 1rem;
+  border-radius: 0.375rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.view-details:hover {
+  background-color: #1d4ed8;
+}
+
+/* Bill Detail */
+.bill-header-detail {
+  margin-bottom: 2rem;
+}
+
+.bill-header-detail h3 {
+  font-size: 1.5rem;
+  color: #1e293b;
+  margin-bottom: 0.5rem;
+}
+
+.analysis-date {
+  color: #64748b;
+  font-size: 0.9rem;
+  font-style: italic;
+}
+
+/* Tabs Component */
+.tabs-container {
+  background-color: white;
+  border-radius: 0.5rem;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
+  overflow: hidden;
+}
+
+.tabs-header {
+  display: flex;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.tab-button {
+  padding: 1rem 1.5rem;
+  background-color: transparent;
+  border: none;
+  border-bottom: 3px solid transparent;
+  font-weight: 500;
+  color: #64748b;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.tab-button:hover {
+  color: #334155;
+}
+
+.tab-button.active {
+  color: #2563eb;
+  border-bottom-color: #2563eb;
+}
+
+.tab-content-container {
+  padding: 1.5rem;
+}
+
+.impact-content h4 {
+  font-size: 1.1rem;
+  color: #334155;
+  margin: 0 0 0.75rem 0;
+}
+
+.impact-content p {
+  color: #475569;
+  line-height: 1.6;
+  margin-bottom: 1.5rem;
+}
+
+.impact-details {
+  background-color: #f8fafc;
+  padding: 1.25rem;
+  border-radius: 0.375rem;
+}
+
+.impact-details p {
+  margin-bottom: 0.75rem;
+}
+
+.impact-details p:last-child {
+  margin-bottom: 0;
+}
+
+/* Responsive Adjustments */
+@media (max-width: 768px) {
+  .bill-cards {
+    grid-template-columns: 1fr;
+  }
+  
+  .tabs-header {
+    flex-direction: column;
+  }
+  
+  .tab-button {
+    text-align: left;
+    border-left: 3px solid transparent;
+    border-bottom: none;
+  }
+  
+  .tab-button.active {
+    border-left-color: currentColor;
+    border-bottom: none;
+    background-color: #f8fafc;
+  }
+}

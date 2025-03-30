@@ -1,0 +1,204 @@
+/* BillAnalysisDashboard.css */
+/* Styles for the Bill Analysis Dashboard component */
+
+.analysis-dashboard {
+  width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 1rem;
+}
+
+.dashboard-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.dashboard-header h1 {
+  font-size: 1.8rem;
+  color: #333;
+  margin: 0;
+}
+
+.filter-controls {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+
+.filter-control {
+  display: flex;
+  flex-direction: column;
+}
+
+.filter-control label {
+  font-size: 0.9rem;
+  margin-bottom: 0.5rem;
+  color: #555;
+}
+
+.filter-control select {
+  padding: 0.5rem;
+  border-radius: 4px;
+  border: 1px solid #ccc;
+  background-color: #fff;
+  font-size: 1rem;
+}
+
+.highlighted-bills {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 1.5rem;
+  margin-bottom: 3rem;
+}
+
+.bill-card {
+  background-color: #fff;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  padding: 1.5rem;
+  transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+}
+
+.bill-card:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.15);
+}
+
+.bill-card h3 {
+  font-size: 1.2rem;
+  margin-top: 0;
+  margin-bottom: 0.5rem;
+  color: #333;
+}
+
+.bill-card .bill-number {
+  font-size: 0.9rem;
+  color: #666;
+  margin-bottom: 1rem;
+}
+
+.impact-summary {
+  margin-top: 1rem;
+}
+
+.impact-item {
+  margin-bottom: 0.75rem;
+}
+
+.impact-title {
+  display: flex;
+  align-items: center;
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+}
+
+.impact-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-right: 0.5rem;
+}
+
+.impact-text {
+  font-size: 0.9rem;
+  color: #555;
+  line-height: 1.4;
+}
+
+.tax-impact .impact-dot {
+  background-color: #e63946;
+}
+
+.budget-impact .impact-dot {
+  background-color: #457b9d;
+}
+
+.societal-impact .impact-dot {
+  background-color: #2a9d8f;
+}
+
+.institutional-impact .impact-dot {
+  background-color: #e9c46a;
+}
+
+.bill-detail {
+  background-color: #fff;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  padding: 2rem;
+  margin-top: 2rem;
+}
+
+.bill-detail-header {
+  margin-bottom: 1.5rem;
+}
+
+.bill-detail-header h2 {
+  font-size: 1.5rem;
+  margin-top: 0;
+  margin-bottom: 0.5rem;
+}
+
+.bill-detail-header p {
+  color: #666;
+  margin: 0;
+}
+
+.tabs-container {
+  margin-top: 1.5rem;
+}
+
+.tabs-header {
+  display: flex;
+  border-bottom: 1px solid #e0e0e0;
+  margin-bottom: 1.5rem;
+}
+
+.tab-button {
+  padding: 0.75rem 1.5rem;
+  background: none;
+  border: none;
+  border-bottom: 3px solid transparent;
+  font-size: 1rem;
+  font-weight: 500;
+  color: #666;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.tab-button.active {
+  color: #1a73e8;
+  border-bottom-color: #1a73e8;
+}
+
+.tab-button:hover {
+  color: #1a73e8;
+}
+
+.tab-content {
+  line-height: 1.6;
+}
+
+@media (max-width: 768px) {
+  .filter-controls {
+    flex-direction: column;
+  }
+  
+  .highlighted-bills {
+    grid-template-columns: 1fr;
+  }
+  
+  .dashboard-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  
+  .dashboard-header h1 {
+    margin-bottom: 1rem;
+  }
+} 
