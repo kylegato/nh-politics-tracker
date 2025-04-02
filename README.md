@@ -1,3 +1,5 @@
+# WORK IN PROGRESS!!!!!!!!!!!! NOT YET READY FOR USE
+
 # NH Legislative Accountability System
 
 A serverless application that tracks New Hampshire legislative activity, analyzes bills using AI, and provides accountability metrics for representatives.
