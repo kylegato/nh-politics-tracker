@@ -77,25 +77,48 @@ export async function storeAnalysisResults(bill, analysis, env) {
     const contentHash = calculateContentHash(bill);
     analysisData.content_hash = contentHash;
     
+    // Debug logging
+    console.log(`Storing analysis with key: ${analysisKey}`);
+    
     // Store permanently in KV (no expiration)
-    await env.NH_LEGISLATIVE_DATA.put(analysisKey, JSON.stringify(analysisData))
-      .catch(error => {
-        throw new StorageError(`Failed to store analysis: ${error.message}`, {
+    try {
+      await env.NH_LEGISLATIVE_DATA.put(analysisKey, JSON.stringify(analysisData));
+      console.log(`Successfully stored analysis with key: ${analysisKey}`);
+    } catch (error) {
+      throw new StorageError(`Failed to store analysis: ${error.message}`, {
+        analysisKey,
+        billId: bill.id
+      });
+    }
+    
+    // Also create a mapping from bill ID to analysis key for easy lookup
+    try {
+      const billMappingKey = `bill:${bill.id}:analysis-key`;
+      await env.NH_LEGISLATIVE_DATA.put(billMappingKey, analysisKey);
+      console.log(`Successfully created bill-to-analysis mapping: ${billMappingKey} -> ${analysisKey}`);
+    } catch (error) {
+      throw new StorageError(`Failed to store bill-to-analysis mapping: ${error.message}`, {
+        billId: bill.id,
+        analysisKey
+      });
+    }
+    
+    // Verify the analysis was stored correctly by reading it back
+    try {
+      const verifyData = await env.NH_LEGISLATIVE_DATA.get(analysisKey, { type: 'json' });
+      if (!verifyData) {
+        throw new StorageError(`Failed to verify analysis storage - data not found after writing`, {
           analysisKey,
           billId: bill.id
         });
+      }
+      console.log(`Verified analysis storage for key: ${analysisKey}`);
+    } catch (error) {
+      throw new StorageError(`Failed to verify analysis was stored: ${error.message}`, {
+        analysisKey,
+        billId: bill.id
       });
-    
-    // Also create a mapping from bill ID to analysis key for easy lookup
-    await env.NH_LEGISLATIVE_DATA.put(`bill:${bill.id}:analysis-key`, analysisKey)
-      .catch(error => {
-        throw new StorageError(`Failed to store bill-to-analysis mapping: ${error.message}`, {
-          billId: bill.id,
-          analysisKey
-        });
-      });
-    
-    console.log(`Stored analysis permanently with key: ${analysisKey}`);
+    }
     
     return analysisKey;
   } catch (error) {

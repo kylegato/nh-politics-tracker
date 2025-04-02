@@ -157,14 +157,28 @@ async function updateBillIndexes(bill, category, env) {
     // This would update various indexes for the bill
     // For now, just update a category index
     const categoryKey = `index:category:${category}`;
+    
+    console.log(`Updating bill index for category: ${category}, bill: ${bill.identifier}`);
+    
     let categoryBills = await env.NH_LEGISLATIVE_DATA.get(categoryKey, { type: 'json' }) || [];
     
     if (!categoryBills.includes(bill.identifier)) {
       categoryBills.push(bill.identifier);
+      
+      // Store updated index
       await env.NH_LEGISLATIVE_DATA.put(categoryKey, JSON.stringify(categoryBills));
+      console.log(`Successfully updated index for category: ${category}, total bills: ${categoryBills.length}`);
+      
+      // Verify the write succeeded
+      const verifyData = await env.NH_LEGISLATIVE_DATA.get(categoryKey, { type: 'json' });
+      if (!verifyData || !verifyData.includes(bill.identifier)) {
+        throw new Error(`Failed to verify category index update for ${bill.identifier}`);
+      }
     }
   } catch (error) {
-    console.error(`Error updating bill indexes: ${error.message}`);
+    console.error(`Error updating bill indexes: ${error.message}`, error);
+    // We're not re-throwing here to avoid breaking the whole process
+    // but we log the full error for debugging
   }
 }
 
@@ -221,7 +235,20 @@ async function processBillWithPersistentAnalysis(bill, env) {
     
     // Store the enhanced bill
     const billKey = `bill:${bill.identifier}`;
-    await env.NH_LEGISLATIVE_DATA.put(billKey, JSON.stringify(enhancedBill));
+    console.log(`Storing enhanced bill with key: ${billKey}`);
+    
+    try {
+      await env.NH_LEGISLATIVE_DATA.put(billKey, JSON.stringify(enhancedBill));
+      console.log(`Successfully stored enhanced bill: ${billKey}`);
+      
+      // Verify the write
+      const verifyBill = await env.NH_LEGISLATIVE_DATA.get(billKey, { type: 'json' });
+      if (!verifyBill || verifyBill.nh_analysis_key !== analysisKey) {
+        throw new Error(`Failed to verify bill storage for ${billKey}`);
+      }
+    } catch (error) {
+      throw new Error(`Failed to store enhanced bill: ${error.message}`);
+    }
     
     // Update bill indexes
     await updateBillIndexes(bill, category, env);
@@ -234,7 +261,7 @@ async function processBillWithPersistentAnalysis(bill, env) {
     console.log(`Completed processing and analysis for bill ${bill.identifier}`);
     return { bill: enhancedBill, analysis };
   } catch (error) {
-    console.error(`Error processing bill ${bill.identifier} with analysis: ${error.message}`);
+    console.error(`Error processing bill ${bill.identifier} with analysis: ${error.message}`, error);
     return { error: error.message };
   }
 }
@@ -271,15 +298,25 @@ function shouldHighlightBill(analysis) {
 async function addBillToHighlightIndex(bill, env) {
   try {
     const highlightKey = `index:highlighted_bills`;
+    console.log(`Adding bill ${bill.identifier} to highlighted index`);
+    
     let highlightedBills = await env.NH_LEGISLATIVE_DATA.get(highlightKey, { type: 'json' }) || [];
     
     if (!highlightedBills.includes(bill.identifier)) {
       highlightedBills.push(bill.identifier);
+      
       await env.NH_LEGISLATIVE_DATA.put(highlightKey, JSON.stringify(highlightedBills));
-      console.log(`Added bill ${bill.identifier} to highlighted bills index`);
+      console.log(`Added bill ${bill.identifier} to highlighted bills index, total count: ${highlightedBills.length}`);
+      
+      // Verify the write succeeded
+      const verifyData = await env.NH_LEGISLATIVE_DATA.get(highlightKey, { type: 'json' });
+      if (!verifyData || !verifyData.includes(bill.identifier)) {
+        throw new Error(`Failed to verify highlight index update for ${bill.identifier}`);
+      }
     }
   } catch (error) {
-    console.error(`Error adding bill ${bill.identifier} to highlight index: ${error.message}`);
+    console.error(`Error adding bill ${bill.identifier} to highlight index: ${error.message}`, error);
+    throw error; // Re-throw to make sure the calling function knows there was an error
   }
 }
 
@@ -363,6 +400,8 @@ async function generateAnalysisSummaries(env) {
   try {
     // Get highlighted bills
     const highlightKey = `index:highlighted_bills`;
+    console.log(`Generating analysis summaries for dashboard`);
+    
     const highlightedBills = await env.NH_LEGISLATIVE_DATA.get(highlightKey, { type: 'json' }) || [];
     
     if (highlightedBills.length === 0) {
@@ -402,10 +441,21 @@ async function generateAnalysisSummaries(env) {
     }
     
     // Store the analysis summaries
-    await env.NH_LEGISLATIVE_METADATA.put('analysis_summaries', JSON.stringify(analysisSummaries));
-    console.log('Generated analysis summaries for dashboard');
+    const summaryKey = 'analysis_summaries';
+    try {
+      await env.NH_LEGISLATIVE_METADATA.put(summaryKey, JSON.stringify(analysisSummaries));
+      console.log(`Generated and stored analysis summaries for dashboard with ${Object.values(analysisSummaries).flat().length} total entries`);
+      
+      // Verify the write
+      const verifySummaries = await env.NH_LEGISLATIVE_METADATA.get(summaryKey, { type: 'json' });
+      if (!verifySummaries) {
+        throw new Error(`Failed to verify analysis summaries storage`);
+      }
+    } catch (error) {
+      throw new Error(`Failed to store analysis summaries: ${error.message}`);
+    }
   } catch (error) {
-    console.error(`Error generating analysis summaries: ${error.message}`);
+    console.error(`Error generating analysis summaries: ${error.message}`, error);
   }
 }
 
@@ -420,24 +470,57 @@ export default {
     console.log(`Starting NH legislative data collection with persistent AI analysis: ${new Date().toISOString()}`);
     
     try {
+      // Test KV write to verify connection is working
+      const testKey = `test:${Date.now()}`;
+      const testValue = { test: true, timestamp: new Date().toISOString() };
+      
+      try {
+        await env.NH_LEGISLATIVE_METADATA.put(testKey, JSON.stringify(testValue));
+        console.log(`KV test write successful with key: ${testKey}`);
+        
+        // Verify the test write
+        const testVerify = await env.NH_LEGISLATIVE_METADATA.get(testKey, { type: 'json' });
+        if (!testVerify || !testVerify.test) {
+          throw new Error('KV test write verification failed');
+        }
+        console.log('KV test read verification successful');
+      } catch (error) {
+        console.error(`KV TEST ERROR: ${error.message}`, error);
+        throw new Error(`KV connection test failed: ${error.message}`);
+      }
+    
       // Get the last update timestamp
       const lastUpdateTimestamp = await getLastUpdateTimestamp(env);
       
       // Process all NH legislative updates with AI analysis
-      await updateBillsWithPersistentAnalysis(lastUpdateTimestamp, env);
+      const updateResult = await updateBillsWithPersistentAnalysis(lastUpdateTimestamp, env);
+      console.log(`Bill updates completed, processed ${updateResult.totalProcessedBills.length} bills`);
       
-      // Collect representative data for accountability metrics
-      await collectRepresentativeData(env);
+      // Store the new update timestamp to track progress
+      if (updateResult.newestUpdateTimestamp !== lastUpdateTimestamp) {
+        try {
+          await env.NH_LEGISLATIVE_METADATA.put('last_update_timestamp', updateResult.newestUpdateTimestamp);
+          console.log(`Updated last_update_timestamp to: ${updateResult.newestUpdateTimestamp}`);
+        } catch (error) {
+          console.error(`Failed to update timestamp: ${error.message}`, error);
+        }
+      }
       
-      // Update committee attendance records
-      await updateCommitteeAttendance(env);
+      // Make sure these operations complete before ending
+      const collectDataPromise = collectRepresentativeData(env);
+      const updateAttendancePromise = updateCommitteeAttendance(env);
+      const generateSummariesPromise = generateAnalysisSummaries(env);
       
-      // Generate analysis summaries for the dashboard
-      await generateAnalysisSummaries(env);
+      // Ensure all operations complete before ending
+      await Promise.all([
+        collectDataPromise,
+        updateAttendancePromise,
+        generateSummariesPromise
+      ]);
       
       console.log(`Completed NH data collection with analysis: ${new Date().toISOString()}`);
     } catch (error) {
-      console.error(`Error in scheduled job: ${error.message}`);
+      console.error(`CRITICAL ERROR in scheduled job: ${error.message}`, error);
       // We could add additional error reporting here (e.g., send to a monitoring service)
     }
   }

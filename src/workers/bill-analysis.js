@@ -37,37 +37,48 @@ export async function analyzeBill(bill, env) {
     if (env.AI) {
       console.log(`Using AI to analyze bill ${bill.identifier}`);
       try {
-        // Add tax impact analysis
-        analysisResult.analyses.tax_impact = await analyzeWithAI(
-          env.AI, 
-          billContent, 
-          'tax_impact',
-          'Analyze the potential tax impact of this bill. Identify if it increases taxes, decreases taxes, or is tax neutral. Estimate the magnitude of impact and affected groups.'
-        );
+        // Process analyses sequentially to avoid overloading
+        const analysisTypes = [
+          {
+            type: 'tax_impact',
+            prompt: 'Analyze the potential tax impact of this bill. Identify if it increases taxes, decreases taxes, or is tax neutral. Estimate the magnitude of impact and affected groups.'
+          },
+          {
+            type: 'budget_impact',
+            prompt: 'Analyze the potential budget impact of this bill. Identify if it increases spending, decreases spending, or is budget neutral. Estimate the magnitude of impact.'
+          },
+          {
+            type: 'societal_impact',
+            prompt: 'Analyze the potential societal impact of this bill. Identify affected groups and estimate the nature and magnitude of impact.'
+          },
+          {
+            type: 'institutional_alignment',
+            prompt: 'Analyze how this bill aligns with various institutional interests such as political parties, industry groups, or advocacy organizations.'
+          }
+        ];
         
-        // Add budget impact analysis
-        analysisResult.analyses.budget_impact = await analyzeWithAI(
-          env.AI, 
-          billContent, 
-          'budget_impact',
-          'Analyze the potential budget impact of this bill. Identify if it increases spending, decreases spending, or is budget neutral. Estimate the magnitude of impact.'
-        );
-        
-        // Add societal impact analysis
-        analysisResult.analyses.societal_impact = await analyzeWithAI(
-          env.AI, 
-          billContent, 
-          'societal_impact',
-          'Analyze the potential societal impact of this bill. Identify affected groups and estimate the nature and magnitude of impact.'
-        );
-        
-        // Add institutional alignment analysis
-        analysisResult.analyses.institutional_alignment = await analyzeWithAI(
-          env.AI, 
-          billContent, 
-          'institutional_alignment',
-          'Analyze how this bill aligns with various institutional interests such as political parties, industry groups, or advocacy organizations.'
-        );
+        // Process each analysis type one at a time
+        for (const analysis of analysisTypes) {
+          try {
+            console.log(`Starting analysis for ${analysis.type} on bill ${bill.identifier}`);
+            analysisResult.analyses[analysis.type] = await analyzeWithAI(
+              env.AI, 
+              billContent, 
+              analysis.type,
+              analysis.prompt
+            );
+            // Add a slight delay between AI calls
+            await new Promise(resolve => setTimeout(resolve, 1000));
+          } catch (typeError) {
+            console.error(`Failed to analyze ${analysis.type} for bill ${bill.identifier}: ${typeError.message}`);
+            // Use simplified analysis for this specific type
+            analysisResult.analyses[analysis.type] = createSimplifiedAnalysis(bill)[analysis.type] || {
+              summary: `Analysis failed: ${typeError.message}`,
+              details: 'An error occurred while analyzing this aspect of the bill.',
+              score: 0
+            };
+          }
+        }
       } catch (aiError) {
         console.error(`AI analysis error for bill ${bill.identifier}: ${aiError.message}`);
         // Fall back to simplified analysis
@@ -79,6 +90,7 @@ export async function analyzeBill(bill, env) {
       Object.assign(analysisResult.analyses, createSimplifiedAnalysis(bill));
     }
     
+    console.log(`Analysis completed for bill ${bill.identifier}`);
     return analysisResult;
   } catch (error) {
     console.error(`Error analyzing bill ${bill?.identifier}: ${error.message}`);
@@ -104,45 +116,136 @@ export async function analyzeBill(bill, env) {
  */
 async function analyzeWithAI(ai, content, type, prompt) {
   try {
+    console.log(`Starting AI analysis for ${type} on bill content length: ${content.length} characters`);
+    
+    // Define JSON schema for structured response
+    const responseSchema = {
+      type: "object",
+      properties: {
+        summary: {
+          type: "string",
+          description: "A one-sentence summary of the impact"
+        },
+        details: {
+          type: "string",
+          description: "2-3 paragraphs with detailed analysis"
+        },
+        score: {
+          type: "integer",
+          description: "Impact score from -5 (very negative) to +5 (very positive), with 0 being neutral",
+          minimum: -5,
+          maximum: 5
+        }
+      },
+      required: ["summary", "details", "score"]
+    };
+    
     // Create the full prompt with instructions
     const fullPrompt = `
 You are a legislative analyst specialized in impact assessment. 
-Analyze the following bill:
+Analyze the following bill and provide a structured analysis:
 
 ${content}
 
 ${prompt}
 
-Format your response as:
-1. Summary: A one-sentence summary of the impact
-2. Details: 2-3 paragraphs with detailed analysis
-3. Score: From -5 (very negative) to +5 (very positive), with 0 being neutral impact
+Provide a summary (one sentence), details (2-3 paragraphs), and score (from -5 to +5) 
+where -5 is very negative impact, 0 is neutral, and +5 is very positive impact.
 `;
 
-    // Call the AI model with the prompt
-    const response = await ai.run('@cf/meta/llama-3-8b-instruct', {
+    // Create a timeout promise
+    const timeout = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error(`AI analysis timeout for ${type}`)), 30000); // 30 second timeout
+    });
+
+    // Call the AI model with the prompt, JSON mode, and race against timeout
+    const aiPromise = ai.run('@cf/meta/llama-3-8b-instruct', {
       prompt: fullPrompt,
-      max_tokens: 500
+      max_tokens: 500,
+      response_format: {
+        type: "json_schema",
+        json_schema: responseSchema
+      }
     });
     
-    // Process the response
-    const analysisText = response.response;
+    console.log(`AI request sent for ${type} using JSON Mode, waiting for response...`);
     
-    // Extract sections using regex
-    const summaryMatch = analysisText.match(/Summary:(.*?)(?=Details:|$)/s);
-    const detailsMatch = analysisText.match(/Details:(.*?)(?=Score:|$)/s);
-    const scoreMatch = analysisText.match(/Score:.*?(-?\d+)/s);
+    // Use Promise.race to implement timeout
+    const response = await Promise.race([aiPromise, timeout])
+      .catch(error => {
+        console.error(`AI analysis failed or timed out for ${type}: ${error.message}`);
+        // Return a fallback response if JSON Mode fails
+        return {
+          response: {
+            summary: `Unable to perform detailed analysis due to ${error.message}.`,
+            details: "The AI analysis service was unable to complete this request in a timely manner.",
+            score: 0
+          }
+        };
+      });
     
-    // Structure the response
-    return {
-      summary: summaryMatch ? summaryMatch[1].trim() : 'No summary available',
-      details: detailsMatch ? detailsMatch[1].trim() : 'No details available',
-      score: scoreMatch ? parseInt(scoreMatch[1], 10) : 0,
-      raw_analysis: analysisText
-    };
+    console.log(`AI response received for ${type}`);
+    
+    // Extract the structured result - with JSON Mode, the AI model returns a structured response
+    let result;
+    
+    if (response.response && typeof response.response === 'object') {
+      // Direct access to JSON object
+      result = {
+        summary: response.response.summary || 'No summary available',
+        details: response.response.details || 'No details available',
+        score: typeof response.response.score === 'number' ? response.response.score : 0
+      };
+    } else if (typeof response.response === 'string') {
+      // Fallback for non-JSON responses (shouldn't happen with JSON Mode enabled)
+      console.warn(`Received string response instead of JSON object for ${type}`);
+      try {
+        // Try to parse as JSON
+        const parsed = JSON.parse(response.response);
+        result = {
+          summary: parsed.summary || 'No summary available',
+          details: parsed.details || 'No details available',
+          score: typeof parsed.score === 'number' ? parsed.score : 0
+        };
+      } catch (parseError) {
+        console.error(`Failed to parse AI response as JSON for ${type}: ${parseError.message}`);
+        // Use legacy regex parsing as fallback
+        const analysisText = response.response;
+        const summaryMatch = analysisText.match(/Summary:(.*?)(?=Details:|$)/s);
+        const detailsMatch = analysisText.match(/Details:(.*?)(?=Score:|$)/s);
+        const scoreMatch = analysisText.match(/Score:.*?(-?\d+)/s);
+        
+        result = {
+          summary: summaryMatch ? summaryMatch[1].trim() : 'No summary available',
+          details: detailsMatch ? detailsMatch[1].trim() : 'No details available',
+          score: scoreMatch ? parseInt(scoreMatch[1], 10) : 0
+        };
+      }
+    } else {
+      // Fallback for unexpected response format
+      result = {
+        summary: `Analysis for ${type} returned in unexpected format.`,
+        details: 'The AI system returned a response in a format that could not be processed.',
+        score: 0
+      };
+    }
+    
+    // Include raw analysis for debugging but limit the size
+    result.raw_analysis = typeof response.response === 'string' 
+      ? response.response.substring(0, 1000) 
+      : JSON.stringify(response.response).substring(0, 1000);
+    
+    console.log(`AI analysis completed for ${type}, summary: "${result.summary.substring(0, 100)}..."`);
+    return result;
   } catch (error) {
-    console.error(`AI analysis error for ${type}: ${error.message}`);
-    throw error;
+    console.error(`Unhandled AI analysis error for ${type}: ${error.message}`);
+    // Return fallback instead of throwing
+    return {
+      summary: `Analysis for ${type} could not be completed due to an error: ${error.message}`,
+      details: 'The system encountered an error while analyzing this section.',
+      score: 0,
+      error: error.message
+    };
   }
 }
 

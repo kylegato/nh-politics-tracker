@@ -3,16 +3,15 @@
   "version": "1.0.0",
   "description": "A serverless application that tracks New Hampshire legislative activity and provides accountability metrics",
   "main": "index.js",
-  "type": "module",
   "scripts": {
     "dev": "wrangler dev src/workers/api-gateway.js",
     "dev:collector": "wrangler dev src/workers/data-collector.js",
-    "build": "webpack --config webpack.config.js",
+    "build": "webpack --config webpack.config.cjs",
     "deploy": "wrangler publish",
     "test": "jest",
     "lint": "eslint src/**/*.js",
     "format": "prettier --write 'src/**/*.{js,jsx,ts,tsx,css,md}'",
-    "interactive-collection": "node src/scripts/interactive-data-collection.js"
+    "interactive-collection": "node src/scripts/interactive-data-collection.mjs"
   },
   "dependencies": {
     "dotenv": "^16.4.7",

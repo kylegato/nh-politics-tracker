@@ -21,9 +21,13 @@ import { getAnalysisByKey } from './analysis-storage';
 // Import data collection functionality
 import dataCollector from './data-collector';
 
+// Import rate limiting (disabled by default)
+import { createRateLimiters } from './rate-limiting';
+
 // Initialize core components
 const logger = createLogger();
 const metricsCollector = createMetricsCollector();
+const rateLimiters = createRateLimiters();
 
 // Define route handlers
 const routes = {
@@ -239,7 +243,7 @@ const routes = {
   '/api/health': createHealthCheckHandler(metricsCollector),
   
   // Metrics endpoint (protected)
-  '/api/metrics': async (request, env) => {
+  '/api/metrics': async (request, env, ctx) => {
     // Simple API key check - in a real system, use a more robust auth mechanism
     const authHeader = request.headers.get('Authorization');
     const apiKey = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
@@ -255,8 +259,10 @@ const routes = {
     // Get current metrics
     const metrics = metricsCollector.getMetrics();
     
-    // Save metrics to KV for historical tracking
-    ctx.waitUntil(metricsCollector.saveMetrics(env));
+    // Save metrics to KV for historical tracking - using waitUntil to ensure it completes
+    // even after the response is returned
+    const savePromise = metricsCollector.saveMetrics(env);
+    ctx.waitUntil(savePromise);
     
     return new Response(JSON.stringify(metrics, null, 2), {
       headers: { 
@@ -352,9 +358,21 @@ const routes = {
       };
       
       // Run the data collection process by calling the scheduled handler
-      // We use waitUntil to allow the request to return while collection continues
       const collectionPromise = dataCollector.scheduled(mockEvent, env, ctx);
-      ctx.waitUntil(collectionPromise);
+      ctx.waitUntil(collectionPromise.catch(error => {
+        console.error(`Error in background data collection: ${error.message}`, error);
+        // Log error to KV for later analysis
+        return env.NH_LEGISLATIVE_METADATA.put(
+          `error:data_collection:${Date.now()}`,
+          JSON.stringify({
+            timestamp: new Date().toISOString(),
+            error: error.message,
+            stack: error.stack
+          })
+        ).catch(err => {
+          console.error(`Failed to log error to KV: ${err.message}`);
+        });
+      }));
       
       return new Response(JSON.stringify({ 
         success: true, 
